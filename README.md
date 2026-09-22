@@ -19,10 +19,13 @@ Browser (slider)  →  /api/articles  (Cloudflare Pages Function, di edge)
 ```
 
 `functions/api/articles.js` berjalan di server/edge Cloudflare, mengambil data
-dari WordPress, lalu meneruskannya ke slider. Ini otomatis menghindari
-masalah CORS, dan sekalian di-cache 10 menit di edge Cloudflare supaya
-website WordPress sekolah tidak dibebani permintaan berulang dari tiap
-layar/HP yang membuka slider.
+dari WordPress, lalu meneruskannya ke slider.
+
+## ⚠️ Penting: cara deploy yang WAJIB dipakai
+
+Cloudflare **tidak mendukung folder `functions/` kalau di-deploy lewat
+"Upload assets" di dashboard (drag & drop)** — proxy anti-CORS-nya tidak akan
+aktif kalau pakai cara itu. Gunakan salah satu dari dua cara di bawah ini.
 
 ## 1. Cek dulu: apakah REST API WordPress aktif
 
@@ -34,33 +37,34 @@ Buka di browser: `https://smkmuhammadiyahtodanan.sch.id/wp-json/wp/v2/posts`
   pengaturan plugin tersebut dan izinkan akses ke `wp-json` untuk publik (GET
   saja, tidak perlu izin tulis).
 
-## 2. Deploy ke Cloudflare Pages
+## 2. Deploy ke Cloudflare Pages (2 cara yang benar-benar berfungsi)
 
-Struktur folder yang perlu di-deploy (semuanya ada di paket ini):
+### Cara A — Lewat GitHub (disarankan, tidak perlu install apa pun)
+
+1. Buat akun gratis di [github.com](https://github.com) kalau belum punya
+2. Klik **New repository** → beri nama, misalnya `berita-muhada` → **Create repository**
+3. Di halaman repo kosong itu, klik **uploading an existing file**
+4. Drag SEMUA isi paket ini ke situ — termasuk folder `functions/` (GitHub
+   akan otomatis membuat strukturnya kalau Anda drag foldernya langsung dari
+   File Explorer/Finder) — lalu **Commit changes**
+5. Buka [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages**
+   → **Create application** → tab **Pages** → **Connect to Git**
+6. Pilih repo `berita-muhada` tadi
+7. Di pengaturan build: kosongkan **Build command**, isi **Build output directory**
+   dengan `/`
+8. **Save and Deploy**
+
+Kelebihan cara ini: kalau nanti mau update kode, tinggal edit file di GitHub
+dan Cloudflare otomatis deploy ulang.
+
+### Cara B — Lewat Wrangler CLI (kalau terbiasa pakai terminal)
+
+Perlu Node.js terinstal di komputer. Dari folder paket ini, jalankan:
 ```
-index.html
-manifest.json
-service-worker.js
-icons/
-functions/
-  api/
-    articles.js
+npx wrangler pages deploy . --project-name=berita-muhada
 ```
-
-**Cara A — Upload langsung lewat dashboard (paling cepat, tanpa akun GitHub):**
-1. Buka dashboard Cloudflare → **Workers & Pages** → **Create application** → tab **Pages** → **Upload assets**
-2. Beri nama project, misalnya `berita-muhada`
-3. Upload/drag seluruh isi folder paket ini (termasuk folder `functions/` —
-   jangan sampai tertinggal, karena di situlah proxy anti-CORS-nya berada)
-4. Klik **Deploy** — Cloudflare otomatis mendeteksi folder `functions/` dan
-   mengaktifkannya sebagai Pages Function
-5. Setelah selesai, Anda dapat URL seperti `https://berita-muhada.pages.dev`
-
-**Cara B — Lewat GitHub (kalau mau versi bisa di-update lewat git push):**
-1. Push folder ini ke sebuah repository GitHub
-2. Di Cloudflare Pages → **Connect to Git** → pilih repo tersebut
-3. Build settings: kosongkan "Build command", set "Build output directory" ke `/` (root)
-4. Deploy
+Wrangler akan minta login ke akun Cloudflare Anda (buka browser otomatis),
+lalu meng-upload semua file TERMASUK folder `functions/` dengan benar.
 
 ## 3. Pasang di TV/monitor lobi (kiosk)
 
@@ -78,6 +82,17 @@ functions/
 
 Setelah di-install, ikon aplikasi akan muncul seperti aplikasi native dan
 terbuka fullscreen tanpa address bar.
+
+## Cara memastikan proxy-nya sudah aktif
+
+Setelah deploy (Cara A atau B di atas), buka langsung:
+```
+https://berita-muhada.pages.dev/api/articles
+```
+Kalau muncul data JSON artikel → proxy aktif, slider akan bekerja.
+Kalau muncul halaman 404 "page not found" → berarti folder `functions/`
+tidak ikut ter-deploy (cek lagi apakah foldernya benar-benar ada di repo
+GitHub / ikut ter-upload oleh Wrangler).
 
 ## (Opsional) Kalau ingin domain sendiri, bukan *.pages.dev
 

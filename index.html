@@ -233,15 +233,16 @@ const CONFIG = {
   // Diambil lewat Cloudflare Pages Function (functions/api/articles.js),
   // bukan langsung ke WordPress, supaya tidak kena blokir CORS browser.
   apiUrl: '/api/articles',
-  slideDurationMs: 8000,       // lama tampil per slide
+  imageDurationMs: 6000,        // lama tampil tiap FOTO (bukan per artikel)
+  maxImagesPerArticle: 5,       // batas jumlah foto yang diambil dari satu artikel
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
-  cacheKey: 'muhada-slider-articles-v1'
+  cacheKey: 'muhada-slider-articles-v2'
 };
 
-let articles = [];
+let articles = [];   // data mentah per artikel (judul, tanggal, daftar gambar)
+let queue = [];      // hasil "diratakan": satu entri per foto, judul artikel bisa berulang
 let currentIndex = 0;
 let slideTimer = null;
-let progressStart = 0;
 
 const slidesEl = document.getElementById('slides');
 const progressTrackEl = document.getElementById('progressTrack');
@@ -261,20 +262,56 @@ function formatDate(iso){
   }catch(e){ return ''; }
 }
 
-function extractArticle(post){
-  let image = null;
+function extractImages(post){
+  const images = [];
+
+  // 1. Foto unggulan (featured image) artikel — diutamakan tampil duluan.
   const media = post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0];
   if (media) {
-    image = (media.media_details && media.media_details.sizes && media.media_details.sizes.large)
+    const src = (media.media_details && media.media_details.sizes && media.media_details.sizes.large)
       ? media.media_details.sizes.large.source_url
       : media.source_url;
+    if (src) images.push(src);
   }
+
+  // 2. Semua gambar lain yang ada di isi/body artikel.
+  try{
+    const html = (post.content && post.content.rendered) || '';
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('img').forEach(img => {
+      const src = img.getAttribute('src');
+      if (src && !images.includes(src)) images.push(src);
+    });
+  }catch(e){ /* abaikan kalau parsing gagal */ }
+
+  return images.slice(0, CONFIG.maxImagesPerArticle);
+}
+
+function extractArticle(post){
   return {
     title: decodeHtml(post.title ? post.title.rendered : ''),
     date: post.date,
     link: post.link,
-    image
+    images: extractImages(post)
   };
+}
+
+/* Meratakan daftar artikel jadi satu entri per FOTO — mirip "Stories":
+   selama masih di artikel yang sama, judul tetap sama, cuma fotonya berganti. */
+function buildQueue(articleList){
+  const q = [];
+  articleList.forEach(a => {
+    const imgs = a.images.length ? a.images : [null];
+    imgs.forEach((image, i) => {
+      q.push({
+        title: a.title,
+        date: a.date,
+        image,
+        isNewArticle: i === 0
+      });
+    });
+  });
+  return q;
 }
 
 /* ============ Ambil data dari WordPress ============ */
@@ -336,21 +373,22 @@ function showState(state){
 
 /* ============ Render slide ============ */
 function renderSlides(preserveIndex){
+  queue = buildQueue(articles);
   slidesEl.innerHTML = '';
   progressTrackEl.innerHTML = '';
 
-  articles.forEach((a) => {
+  queue.forEach((s) => {
     const slide = document.createElement('div');
     slide.className = 'slide';
-    if (a.image) slide.style.backgroundImage = `url("${a.image}")`;
+    if (s.image) slide.style.backgroundImage = `url("${s.image}")`;
     slide.innerHTML = `
       <div class="slide-content">
         <div class="meta-row">
-          <span class="meta-date">${formatDate(a.date)}</span>
+          <span class="meta-date">${formatDate(s.date)}</span>
           <span class="meta-sep"></span>
           <span class="meta-source">Berita SMK Muhammadiyah Todanan</span>
         </div>
-        <div class="title">${a.title}</div>
+        <div class="title">${s.title}</div>
       </div>`;
     slidesEl.appendChild(slide);
 
@@ -360,13 +398,25 @@ function renderSlides(preserveIndex){
     progressTrackEl.appendChild(seg);
   });
 
-  if (!preserveIndex || currentIndex >= articles.length) currentIndex = 0;
+  if (!preserveIndex || currentIndex >= queue.length) currentIndex = 0;
   updateActiveSlide();
 }
 
 function updateActiveSlide(){
-  document.querySelectorAll('.slide').forEach((el,i)=>{
-    el.classList.toggle('active', i === currentIndex);
+  const slideEls = document.querySelectorAll('.slide');
+  slideEls.forEach((el,i)=>{
+    const isActive = i === currentIndex;
+    if (isActive && queue[i] && !queue[i].isNewArticle){
+      // Foto baru, artikel sama: tampilkan teks langsung tanpa animasi
+      // masuk lagi, supaya judul terasa "menetap" selama masih 1 artikel.
+      const content = el.querySelector('.slide-content');
+      content.style.transition = 'none';
+      el.classList.add('active');
+      void content.offsetWidth;
+      content.style.transition = '';
+    } else {
+      el.classList.toggle('active', isActive);
+    }
   });
   document.querySelectorAll('.progress-seg').forEach((seg,i)=>{
     seg.classList.remove('filling');
@@ -387,13 +437,13 @@ function startProgress(){
   fill.style.width = '0%';
   // force reflow so the transition below actually animates
   void fill.offsetWidth;
-  fill.style.transition = `width ${CONFIG.slideDurationMs}ms linear`;
+  fill.style.transition = `width ${CONFIG.imageDurationMs}ms linear`;
   fill.style.width = '100%';
 }
 
 function goTo(index){
-  if (articles.length === 0) return;
-  currentIndex = (index + articles.length) % articles.length;
+  if (queue.length === 0) return;
+  currentIndex = (index + queue.length) % queue.length;
   updateActiveSlide();
   startProgress();
   resetTimer();
@@ -404,7 +454,7 @@ function prevSlide(){ goTo(currentIndex - 1); }
 
 function resetTimer(){
   clearTimeout(slideTimer);
-  slideTimer = setTimeout(nextSlide, CONFIG.slideDurationMs);
+  slideTimer = setTimeout(nextSlide, CONFIG.imageDurationMs);
 }
 
 function startSlideshow(){
