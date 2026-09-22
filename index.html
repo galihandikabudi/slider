@@ -14,7 +14,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/smartcrop@2.0.5/smartcrop.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   :root{
@@ -152,18 +151,19 @@
     right:6vw;
     bottom:8vh;
     background:#fff;
-    border-radius:14px;
-    padding:10px 10px 8px;
+    border-radius:16px;
+    padding:12px 12px 9px;
     display:flex;
     flex-direction:column;
     align-items:center;
-    gap:5px;
+    gap:6px;
     box-shadow:0 12px 30px rgba(0,0,0,.4);
     z-index:3;
   }
+  .qr-box.hidden{ display:none; }
   .qr-box .qr-canvas-wrap{
-    width:clamp(64px,7vw,96px);
-    height:clamp(64px,7vw,96px);
+    width:clamp(110px,11vw,180px);
+    height:clamp(110px,11vw,180px);
     display:flex;
     align-items:center;
     justify-content:center;
@@ -172,19 +172,113 @@
   .qr-box .qr-canvas-wrap canvas{
     width:100% !important;
     height:100% !important;
+    image-rendering:pixelated;
   }
   .qr-box .qr-label{
     font-family:'Inter',sans-serif;
-    font-size:10.5px;
+    font-size:11.5px;
     font-weight:600;
     color:var(--biru-tua);
     text-align:center;
-    max-width:96px;
+    max-width:110px;
     line-height:1.25;
   }
   @media (max-width:640px){
-    .qr-box{ right:5vw; bottom:auto; top:14vh; padding:8px 8px 6px; }
+    .qr-box{ right:5vw; bottom:auto; top:14vh; padding:9px 9px 7px; }
+    .qr-box .qr-canvas-wrap{ width:88px; height:88px; }
   }
+
+  /* ---------- Mode edit posisi foto (tersembunyi, khusus admin) ---------- */
+  body.edit-mode .navzone{ pointer-events:none; }
+  body.edit-mode .qr-box{ display:none; }
+  body.edit-mode .topbar{ opacity:0; }
+  body.edit-mode .slide.active{ cursor:grab; touch-action:none; }
+  body.edit-mode .slide.active:active{ cursor:grabbing; }
+
+  .edit-toolbar{
+    position:absolute;
+    left:0; right:0; bottom:0;
+    z-index:30;
+    background:rgba(14,23,48,.94);
+    backdrop-filter:blur(6px);
+    padding:2.2vh 4vw calc(2.2vh + env(safe-area-inset-bottom,0px));
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+  }
+  .edit-toolbar.hidden{ display:none; }
+  .edit-toolbar .edit-info{
+    color:#fff;
+    font-size:clamp(12px,1.2vw,15px);
+  }
+  .edit-toolbar .edit-info b{ color:var(--oranye); }
+  .edit-toolbar .edit-actions{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .edit-btn{
+    font-family:'Inter',sans-serif;
+    font-size:13px;
+    font-weight:600;
+    padding:9px 16px;
+    border-radius:10px;
+    border:none;
+    cursor:pointer;
+    background:rgba(255,255,255,.12);
+    color:#fff;
+  }
+  .edit-btn:hover{ background:rgba(255,255,255,.2); }
+  .edit-btn.primary{ background:var(--biru-terang); }
+  .edit-btn.primary:hover{ background:#1c5fce; }
+  .edit-btn.danger{ background:transparent; color:rgba(255,255,255,.6); }
+
+  .edit-toggle-btn{
+    position:absolute;
+    left:16px;
+    bottom:16px;
+    z-index:25;
+    width:0; height:0;
+    opacity:0;
+    pointer-events:none;
+    border:none;
+    border-radius:50%;
+    background:var(--oranye);
+    color:#fff;
+    font-size:18px;
+    transition:opacity 200ms ease;
+  }
+  .edit-toggle-btn.visible{
+    width:44px; height:44px;
+    opacity:.85;
+    pointer-events:auto;
+  }
+
+  .admin-panel{
+    position:absolute;
+    left:16px;
+    bottom:16px;
+    z-index:26;
+    background:rgba(14,23,48,.96);
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:14px;
+    padding:16px 18px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    min-width:220px;
+  }
+  .admin-panel.hidden{ display:none; }
+  .admin-panel label{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    color:#fff;
+    font-size:13px;
+  }
+  .admin-panel .edit-btn{ width:100%; text-align:center; }
 
   /* ---------- Tap zones for manual nav ---------- */
   .navzone{
@@ -270,6 +364,25 @@
     <p>Slider akan otomatis menampilkan berita begitu ada artikel baru di website sekolah.</p>
   </div>
 
+  <button class="edit-toggle-btn" id="editToggleBtn" title="Atur posisi foto">✎</button>
+
+  <div class="admin-panel hidden" id="adminPanel">
+    <label><input type="checkbox" id="qrVisibleToggle"> Tampilkan kode QR di layar ini</label>
+    <button class="edit-btn primary" id="openEditModeBtn">Atur posisi foto</button>
+    <button class="edit-btn danger" id="closeAdminPanelBtn">Tutup panel</button>
+  </div>
+
+  <div class="edit-toolbar hidden" id="editToolbar">
+    <div class="edit-info">Geser foto untuk atur posisi — mode: <b id="editDeviceLabel"></b></div>
+    <div class="edit-actions">
+      <button class="edit-btn" id="editPrevBtn">◀ Sebelumnya</button>
+      <button class="edit-btn" id="editNextBtn">Berikutnya ▶</button>
+      <button class="edit-btn" id="editResetBtn">Reset ke tengah</button>
+      <button class="edit-btn primary" id="editSaveBtn">Simpan</button>
+      <button class="edit-btn danger" id="editDoneBtn">Selesai</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -278,26 +391,33 @@ const CONFIG = {
   // Diambil lewat Cloudflare Pages Function (functions/api/articles.js),
   // bukan langsung ke WordPress, supaya tidak kena blokir CORS browser.
   apiUrl: '/api/articles',
-  imageProxyUrl: '/api/image?url=', // dipakai supaya foto bisa dianalisis kanvas (lihat computeFocalPoint)
+  imageProxyUrl: '/api/image?url=', // proxy gambar (perbaikan hotlink/URL relatif)
+  positionApiUrl: '/api/position',  // penyimpanan posisi foto manual (perlu KV, lihat README)
   wpOrigin: 'https://smkmuhammadiyahtodanan.sch.id', // untuk melengkapi URL gambar yang ditulis relatif
   imageDurationMs: 6000,        // lama tampil tiap FOTO (bukan per artikel)
   maxImagesPerArticle: 5,       // batas jumlah foto yang diambil dari satu artikel
-  smartCropStrength: 0.7,       // 0 = selalu tengah, 1 = ikuti hasil deteksi 100% (lihat computeFocalPoint)
-  smartCropMargin: 15,          // % — batas seberapa dekat titik fokus boleh ke tepi gambar
+  mobileBreakpoint: 768,        // di bawah lebar ini (px) dianggap "HP", di atasnya "Desktop/Tablet"
+  editPin: '1234',              // GANTI ini dengan PIN Anda sendiri sebelum deploy
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
-  cacheKey: 'muhada-slider-articles-v2',
-  focalCacheKey: 'muhada-slider-focal-v2'
+  cacheKey: 'muhada-slider-articles-v3',
+  positionCacheKey: 'muhada-slider-positions-v1',
+  qrVisibleKey: 'muhada-slider-qr-visible-v1'
 };
 
 let articles = [];   // data mentah per artikel (judul, tanggal, daftar gambar)
 let queue = [];      // hasil "diratakan": satu entri per foto, judul artikel bisa berulang
 let currentIndex = 0;
 let slideTimer = null;
+let editMode = false;
+let adminUnlocked = false;
 
-// Titik fokus tiap gambar yang sudah dihitung (persisten lintas sesi/reboot TV,
-// supaya tidak perlu dianalisis ulang tiap kali halaman dibuka).
-let focalCache = {};
-try{ focalCache = JSON.parse(localStorage.getItem(CONFIG.focalCacheKey) || '{}'); }catch(e){ focalCache = {}; }
+// Posisi foto yang sudah diatur manual (dipisah per kategori perangkat),
+// dimuat dari server (kalau KV sudah diatur) + fallback lokal per perangkat.
+let savedPositions = {};
+try{ savedPositions = JSON.parse(localStorage.getItem(CONFIG.positionCacheKey) || '{}'); }catch(e){ savedPositions = {}; }
+
+let qrVisible = true;
+try{ const v = localStorage.getItem(CONFIG.qrVisibleKey); if (v !== null) qrVisible = v === '1'; }catch(e){ /* pakai default */ }
 
 const slidesEl = document.getElementById('slides');
 const loadingScreen = document.getElementById('loadingScreen');
@@ -305,6 +425,18 @@ const errorScreen = document.getElementById('errorScreen');
 const emptyScreen = document.getElementById('emptyScreen');
 const clockTimeEl = document.getElementById('clockTime');
 const clockDateEl = document.getElementById('clockDate');
+const editToggleBtn = document.getElementById('editToggleBtn');
+const adminPanel = document.getElementById('adminPanel');
+const qrVisibleToggle = document.getElementById('qrVisibleToggle');
+const openEditModeBtn = document.getElementById('openEditModeBtn');
+const closeAdminPanelBtn = document.getElementById('closeAdminPanelBtn');
+const editToolbar = document.getElementById('editToolbar');
+const editDeviceLabel = document.getElementById('editDeviceLabel');
+const editPrevBtn = document.getElementById('editPrevBtn');
+const editNextBtn = document.getElementById('editNextBtn');
+const editResetBtn = document.getElementById('editResetBtn');
+const editSaveBtn = document.getElementById('editSaveBtn');
+const editDoneBtn = document.getElementById('editDoneBtn');
 
 function decodeHtml(html){
   const txt = document.createElement('textarea');
@@ -398,6 +530,7 @@ function extractImages(post){
 
 function extractArticle(post){
   return {
+    id: post.id,
     title: decodeHtml(post.title ? post.title.rendered : ''),
     date: post.date,
     link: post.link,
@@ -418,6 +551,7 @@ function buildQueue(articleList){
     if (imgs.length === 0) imgs = [null]; // artikel tetap tampil walau semua fotonya duplikat
     imgs.forEach((image, i) => {
       q.push({
+        id: a.id,
         title: a.title,
         date: a.date,
         link: a.link,
@@ -486,76 +620,53 @@ function showState(state){
   emptyScreen.classList.toggle('hidden', state !== 'empty');
 }
 
-/* ============ Deteksi titik fokus otomatis (smart-crop) ============
-   Menganalisis tiap foto (tepi, warna kulit, area kontras tinggi) untuk
-   menentukan bagian mana yang paling penting, lalu itu yang dijadikan
-   pusat crop — bukan selalu tengah gambar mentah-mentah. */
-function saveFocalCache(){
-  try{ localStorage.setItem(CONFIG.focalCacheKey, JSON.stringify(focalCache)); }catch(e){ /* penuh/diblokir, abaikan */ }
+/* ============ Posisi foto manual (ganti fitur smart-crop otomatis) ============
+   Posisi diatur sendiri oleh admin lewat mode edit, dipisah per kategori
+   perangkat (HP vs Desktop/Tablet, dideteksi dari lebar layar saat itu),
+   dan disimpan supaya "menempel" tiap kali dibuka ulang — oleh siapa pun,
+   di perangkat mana pun (kalau KV sudah diatur; kalau belum, tersimpan di
+   perangkat itu saja). */
+function getDeviceCategory(){
+  return (window.innerWidth || document.documentElement.clientWidth) < CONFIG.mobileBreakpoint
+    ? 'mobile' : 'desktop';
 }
 
-function loadImageEl(src){
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
+function getPositionFor(imageUrl){
+  const entry = savedPositions[imageUrl];
+  if (!entry) return null;
+  return entry[getDeviceCategory()] || null;
 }
 
-async function computeFocalPoint(src){
-  if (!src) return null;
-  if (focalCache[src]) return focalCache[src];
-  if (typeof smartcrop === 'undefined') return null; // library gagal dimuat, pakai posisi tengah
+async function loadSavedPositions(){
+  try{
+    const res = await fetch(CONFIG.positionApiUrl, { cache:'no-store' });
+    if (res.ok){
+      const serverData = await res.json();
+      savedPositions = Object.assign({}, savedPositions, serverData);
+      try{ localStorage.setItem(CONFIG.positionCacheKey, JSON.stringify(savedPositions)); }catch(e){}
+      renderSlides(true); // terapkan ulang kalau slide sudah sempat dirender duluan
+    }
+  }catch(e){ /* offline / KV belum diatur -> tetap pakai yang lokal */ }
+}
+
+async function savePosition(imageUrl, position){
+  const device = getDeviceCategory();
+  if (!savedPositions[imageUrl]) savedPositions[imageUrl] = {};
+  savedPositions[imageUrl][device] = position;
+  try{ localStorage.setItem(CONFIG.positionCacheKey, JSON.stringify(savedPositions)); }catch(e){}
 
   try{
-    const img = await loadImageEl(src);
-    const targetW = Math.max(window.innerWidth || 0, 800);
-    const targetH = Math.max(window.innerHeight || 0, 450);
-    const result = await smartcrop.crop(img, { width: targetW, height: targetH, minScale: 1 });
-    const c = result.topCrop;
-    const rawXPct = (( c.x + c.width / 2) / img.naturalWidth) * 100;
-    const rawYPct = (( c.y + c.height / 2) / img.naturalHeight) * 100;
-
-    // Redam hasil deteksi supaya tidak terlalu ekstrem kalau tebakannya
-    // meleset (dicampur sebagian ke tengah), dan jangan biarkan titik
-    // fokus terlalu mepet ke tepi gambar (crop di ujung sering terlihat
-    // janggal / memotong objek penting).
-    const s = CONFIG.smartCropStrength;
-    const m = CONFIG.smartCropMargin;
-    let xPct = 50 + (rawXPct - 50) * s;
-    let yPct = 50 + (rawYPct - 50) * s;
-    xPct = Math.min(100 - m, Math.max(m, xPct));
-    yPct = Math.min(100 - m, Math.max(m, yPct));
-
-    const pos = xPct.toFixed(1) + '% ' + yPct.toFixed(1) + '%';
-    focalCache[src] = pos;
-    saveFocalCache();
-    return pos;
+    const res = await fetch(CONFIG.positionApiUrl, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ imageUrl, device, position })
+    });
+    return res.ok
+      ? 'Tersimpan — akan tampil di semua perangkat.'
+      : 'Tersimpan di perangkat ini saja (server belum diatur — lihat README).';
   }catch(e){
-    return null; // gambar gagal dimuat/dianalisis -> tetap tampil, posisi default tengah
+    return 'Tersimpan di perangkat ini saja (sedang offline).';
   }
-}
-
-function ensureFocalPoint(index){
-  const s = queue[index];
-  if (!s || !s.image) return;
-  const el = document.querySelectorAll('.slide')[index];
-  if (!el || el.dataset.focalDone) return;
-  el.dataset.focalDone = '1';
-  computeFocalPoint(s.image).then(pos => {
-    if (pos) el.style.backgroundPosition = pos;
-  });
-}
-
-// Hitung untuk slide yang sedang tampil + 2 slide berikutnya, supaya saat
-// gilirannya tiba, titik fokusnya sudah siap (tidak "lompat" posisinya).
-function prefetchFocalAround(index){
-  if (queue.length === 0) return;
-  ensureFocalPoint(index);
-  ensureFocalPoint((index + 1) % queue.length);
-  ensureFocalPoint((index + 2) % queue.length);
 }
 
 /* ============ Render slide ============ */
@@ -566,7 +677,11 @@ function renderSlides(preserveIndex){
   queue.forEach((s) => {
     const slide = document.createElement('div');
     slide.className = 'slide';
-    if (s.image) slide.style.backgroundImage = `url("${s.image}")`;
+    if (s.image) {
+      slide.style.backgroundImage = `url("${s.image}")`;
+      const pos = getPositionFor(s.image);
+      if (pos) slide.style.backgroundPosition = pos;
+    }
     slide.innerHTML = `
       <div class="slide-content">
         <div class="meta-row">
@@ -576,33 +691,36 @@ function renderSlides(preserveIndex){
         </div>
         <div class="title">${s.title}</div>
       </div>
-      <div class="qr-box">
+      <div class="qr-box${qrVisible ? '' : ' hidden'}">
         <div class="qr-canvas-wrap"></div>
         <div class="qr-label">Scan untuk baca berita lengkap</div>
       </div>`;
     slidesEl.appendChild(slide);
-    renderQrCode(slide, s.link);
+    renderQrCode(slide, s.id);
   });
 
   if (!preserveIndex || currentIndex >= queue.length) currentIndex = 0;
   updateActiveSlide();
 }
 
-function renderQrCode(slideEl, link){
-  if (!link || typeof QRCode === 'undefined') {
+function renderQrCode(slideEl, postId){
+  if (!postId || typeof QRCode === 'undefined') {
     const box = slideEl.querySelector('.qr-box');
     if (box) box.style.display = 'none';
     return;
   }
+  // Link pendek buatan sendiri (/r/<id>) supaya QR tidak padat & gampang
+  // di-scan dari jarak jauh — jauh lebih pendek daripada URL artikel asli.
+  const shortLink = `${window.location.origin}/r/${postId}`;
   const wrap = slideEl.querySelector('.qr-canvas-wrap');
   try{
     new QRCode(wrap, {
-      text: link,
-      width: 96,
-      height: 96,
+      text: shortLink,
+      width: 160,
+      height: 160,
       colorDark: '#1B2E6E',
       colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.M
+      correctLevel: QRCode.CorrectLevel.L // level koreksi terendah = modul lebih sedikit/renggang
     });
   }catch(e){
     const box = slideEl.querySelector('.qr-box');
@@ -632,8 +750,7 @@ function goTo(index){
   if (queue.length === 0) return;
   currentIndex = (index + queue.length) % queue.length;
   updateActiveSlide();
-  resetTimer();
-  prefetchFocalAround(currentIndex);
+  if (!editMode) resetTimer();
 }
 
 function nextSlide(){ goTo(currentIndex + 1); }
@@ -649,7 +766,6 @@ function startSlideshow(){
   currentIndex = 0;
   updateActiveSlide();
   resetTimer();
-  prefetchFocalAround(currentIndex);
 }
 
 /* ============ Jam & tanggal ============ */
@@ -661,6 +777,143 @@ function updateClock(){
 updateClock();
 setInterval(updateClock, 1000 * 30); // cukup tiap 30 detik, jam tidak perlu presisi detik
 
+/* ============ Panel admin tersembunyi (tekan-tahan logo) ============ */
+let wordmarkPressTimer = null;
+document.querySelector('.wordmark').addEventListener('pointerdown', () => {
+  wordmarkPressTimer = setTimeout(openAdminPanel, 1200);
+});
+['pointerup','pointerleave','pointercancel'].forEach(evt => {
+  document.querySelector('.wordmark').addEventListener(evt, () => clearTimeout(wordmarkPressTimer));
+});
+
+function openAdminPanel(){
+  if (!adminUnlocked){
+    const pin = prompt('Masukkan PIN admin:');
+    if (pin !== CONFIG.editPin){
+      if (pin !== null) alert('PIN salah.');
+      return;
+    }
+    adminUnlocked = true;
+    editToggleBtn.classList.add('visible');
+  }
+  qrVisibleToggle.checked = qrVisible;
+  adminPanel.classList.remove('hidden');
+}
+
+closeAdminPanelBtn.addEventListener('click', () => adminPanel.classList.add('hidden'));
+
+qrVisibleToggle.addEventListener('change', () => {
+  qrVisible = qrVisibleToggle.checked;
+  try{ localStorage.setItem(CONFIG.qrVisibleKey, qrVisible ? '1' : '0'); }catch(e){}
+  document.querySelectorAll('.qr-box').forEach(box => box.classList.toggle('hidden', !qrVisible));
+});
+
+editToggleBtn.addEventListener('click', () => {
+  if (adminUnlocked) adminPanel.classList.remove('hidden');
+});
+
+openEditModeBtn.addEventListener('click', () => {
+  adminPanel.classList.add('hidden');
+  enterEditMode();
+});
+
+/* ============ Mode edit posisi foto ============ */
+let dragHandlersRef = null;
+
+function getActiveSlideEl(){
+  return document.querySelectorAll('.slide')[currentIndex];
+}
+
+function clampNum(v, min, max){ return Math.min(max, Math.max(min, v)); }
+
+function parsePosition(el){
+  const bp = el.style.backgroundPosition || '50% 50%';
+  const parts = bp.split(' ');
+  return { x: parseFloat(parts[0]) || 50, y: parseFloat(parts[1]) || 50 };
+}
+
+function attachDragHandlers(){
+  const el = getActiveSlideEl();
+  if (!el) return;
+  let dragging = false;
+  let start = null;
+  let startPos = null;
+
+  function onDown(e){
+    dragging = true;
+    start = { x: e.clientX, y: e.clientY };
+    startPos = parsePosition(el);
+    try{ el.setPointerCapture(e.pointerId); }catch(err){}
+  }
+  function onMove(e){
+    if (!dragging) return;
+    const rect = el.getBoundingClientRect();
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    const newX = clampNum(startPos.x - (dx / rect.width) * 100, 0, 100);
+    const newY = clampNum(startPos.y - (dy / rect.height) * 100, 0, 100);
+    el.style.backgroundPosition = newX.toFixed(1) + '% ' + newY.toFixed(1) + '%';
+  }
+  function onUp(e){
+    dragging = false;
+    try{ el.releasePointerCapture(e.pointerId); }catch(err){}
+  }
+
+  el.addEventListener('pointerdown', onDown);
+  el.addEventListener('pointermove', onMove);
+  el.addEventListener('pointerup', onUp);
+  el.addEventListener('pointercancel', onUp);
+  dragHandlersRef = { el, onDown, onMove, onUp };
+}
+
+function detachDragHandlers(){
+  if (!dragHandlersRef) return;
+  const { el, onDown, onMove, onUp } = dragHandlersRef;
+  el.removeEventListener('pointerdown', onDown);
+  el.removeEventListener('pointermove', onMove);
+  el.removeEventListener('pointerup', onUp);
+  el.removeEventListener('pointercancel', onUp);
+  dragHandlersRef = null;
+}
+
+function enterEditMode(){
+  editMode = true;
+  clearTimeout(slideTimer);
+  document.body.classList.add('edit-mode');
+  editToolbar.classList.remove('hidden');
+  editDeviceLabel.textContent = getDeviceCategory() === 'mobile' ? 'HP' : 'Desktop / Tablet';
+  attachDragHandlers();
+}
+
+function exitEditMode(){
+  editMode = false;
+  detachDragHandlers();
+  document.body.classList.remove('edit-mode');
+  editToolbar.classList.add('hidden');
+  resetTimer();
+}
+
+editPrevBtn.addEventListener('click', () => { detachDragHandlers(); prevSlide(); attachDragHandlers(); });
+editNextBtn.addEventListener('click', () => { detachDragHandlers(); nextSlide(); attachDragHandlers(); });
+
+editResetBtn.addEventListener('click', () => {
+  const el = getActiveSlideEl();
+  if (el) el.style.backgroundPosition = '50% 50%';
+});
+
+editSaveBtn.addEventListener('click', async () => {
+  const el = getActiveSlideEl();
+  const s = queue[currentIndex];
+  if (!el || !s || !s.image) { alert('Slide ini tidak punya foto untuk diatur.'); return; }
+  const pos = el.style.backgroundPosition || '50% 50%';
+  editSaveBtn.textContent = 'Menyimpan…';
+  const msg = await savePosition(s.image, pos);
+  editSaveBtn.textContent = 'Simpan';
+  alert(msg);
+});
+
+editDoneBtn.addEventListener('click', exitEditMode);
+
 /* ============ Navigasi manual (tap / swipe) ============ */
 document.getElementById('zonePrev').addEventListener('click', prevSlide);
 document.getElementById('zoneNext').addEventListener('click', nextSlide);
@@ -668,7 +921,7 @@ document.getElementById('zoneNext').addEventListener('click', nextSlide);
 let touchStartX = null;
 document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, {passive:true});
 document.addEventListener('touchend', e => {
-  if (touchStartX === null) return;
+  if (touchStartX === null || editMode) return;
   const dx = e.changedTouches[0].clientX - touchStartX;
   if (Math.abs(dx) > 50) { dx > 0 ? prevSlide() : nextSlide(); }
   touchStartX = null;
@@ -682,6 +935,7 @@ document.addEventListener('keydown', e => {
 /* ============ Boot ============ */
 showState('loading');
 loadData(false);
+loadSavedPositions();
 setInterval(() => loadData(true), CONFIG.refreshDataEveryMs);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {

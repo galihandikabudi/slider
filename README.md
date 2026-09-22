@@ -1,126 +1,107 @@
 # Berita SMK Muhammadiyah Todanan — Slider Otomatis (PWA)
 
-Aplikasi slider fullscreen otomatis yang menampilkan 20 artikel terbaru dari
-website sekolah (judul + foto artikel sebagai background), dan bisa dipakai di
-TV/monitor lobi, HP, tablet, maupun komputer.
+Slider fullscreen otomatis yang menampilkan artikel terbaru dari website
+sekolah (judul + foto sebagai background), dipakai di TV lobi, HP, tablet,
+maupun komputer. Di-deploy di Cloudflare Pages lewat GitHub.
 
-## Arsitektur
-
-Karena halaman slider ini di-deploy di **Cloudflare Pages** (domain berbeda
-dari website WordPress sekolah), pengambilan data TIDAK dilakukan langsung
-dari browser ke WordPress — itu akan diblokir aturan CORS browser. Sebagai
-gantinya:
+## Struktur proyek
 
 ```
-Browser (slider)  →  /api/articles  (Cloudflare Pages Function, di edge)
-                          ↓
-                   WordPress REST API
-                   (wp-json/wp/v2/posts)
+index.html               halaman utama slider
+manifest.json / icons/    supaya bisa di-install seperti aplikasi
+service-worker.js         caching offline
+functions/api/articles.js proxy WordPress REST API (hindari CORS)
+functions/api/image.js    proxy gambar (hindari hotlink/CORS + resolusi tinggi)
+functions/api/position.js penyimpanan posisi foto manual (perlu KV, opsional)
+functions/r/[id].js       link pendek untuk QR code (redirect ke artikel asli)
 ```
 
-`functions/api/articles.js` berjalan di server/edge Cloudflare, mengambil data
-dari WordPress, lalu meneruskannya ke slider.
+## 1. Cek REST API WordPress aktif
 
-## ⚠️ Penting: cara deploy yang WAJIB dipakai
+Buka: `https://smkmuhammadiyahtodanan.sch.id/wp-json/wp/v2/posts` — harus
+muncul data JSON. Kalau tidak, cek plugin keamanan yang mungkin memblokirnya.
 
-Cloudflare **tidak mendukung folder `functions/` kalau di-deploy lewat
-"Upload assets" di dashboard (drag & drop)** — proxy anti-CORS-nya tidak akan
-aktif kalau pakai cara itu. Gunakan salah satu dari dua cara di bawah ini.
+## 2. Deploy ke Cloudflare Pages lewat GitHub
 
-## 1. Cek dulu: apakah REST API WordPress aktif
+1. Push/upload semua file di paket ini ke repo GitHub (termasuk folder `functions/`)
+2. Cloudflare Pages → **Connect to Git** → pilih repo → Build command kosong,
+   Build output directory `/`
+3. Deploy
 
-Buka di browser: `https://smkmuhammadiyahtodanan.sch.id/wp-json/wp/v2/posts`
+**Wajib lewat GitHub atau Wrangler CLI** — upload langsung ("Upload assets")
+di dashboard TIDAK mendukung folder `functions/`.
 
-- Kalau muncul teks/JSON panjang berisi data artikel → aktif, lanjut ke langkah 2.
-- Kalau muncul error atau halaman kosong → kemungkinan ada plugin keamanan
-  (Wordfence, iThemes Security, dll.) yang memblokir REST API. Masuk ke
-  pengaturan plugin tersebut dan izinkan akses ke `wp-json` untuk publik (GET
-  saja, tidak perlu izin tulis).
+## 3. (Opsional, tapi disarankan) Aktifkan penyimpanan posisi foto bersama
 
-## 2. Deploy ke Cloudflare Pages (2 cara yang benar-benar berfungsi)
+Fitur "atur posisi foto" (lihat bagian bawah) bisa disimpan dengan dua cara:
+- **Tanpa setup apa pun**: posisi tersimpan di perangkat itu SAJA (kalau Anda
+  edit di HP, TV lobi tidak ikut berubah).
+- **Dengan KV (disarankan)**: posisi tersimpan di server, otomatis tampil
+  sama di semua perangkat begitu diedit sekali.
 
-### Cara A — Lewat GitHub (disarankan, tidak perlu install apa pun)
+Cara mengaktifkan KV:
+1. Cloudflare dashboard → **Workers & Pages** → **KV** → **Create a namespace**,
+   beri nama misalnya `muhada-slider-positions`
+2. Buka project Pages Anda → **Settings** → **Functions** → **KV namespace bindings**
+   → **Add binding**
+3. Variable name: `POSITIONS` (harus persis ini, huruf besar semua)
+   Namespace: pilih `muhada-slider-positions` yang baru dibuat
+4. Save — Cloudflare akan otomatis redeploy
 
-1. Buat akun gratis di [github.com](https://github.com) kalau belum punya
-2. Klik **New repository** → beri nama, misalnya `berita-muhada` → **Create repository**
-3. Di halaman repo kosong itu, klik **uploading an existing file**
-4. Drag SEMUA isi paket ini ke situ — termasuk folder `functions/` (GitHub
-   akan otomatis membuat strukturnya kalau Anda drag foldernya langsung dari
-   File Explorer/Finder) — lalu **Commit changes**
-5. Buka [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages**
-   → **Create application** → tab **Pages** → **Connect to Git**
-6. Pilih repo `berita-muhada` tadi
-7. Di pengaturan build: kosongkan **Build command**, isi **Build output directory**
-   dengan `/`
-8. **Save and Deploy**
+Tanpa langkah ini, aplikasi tetap berjalan normal, cuma posisi fotonya jadi
+per-perangkat saja.
 
-Kelebihan cara ini: kalau nanti mau update kode, tinggal edit file di GitHub
-dan Cloudflare otomatis deploy ulang.
+## 4. Pasang di TV lobi / install ke HP-tablet-komputer
 
-### Cara B — Lewat Wrangler CLI (kalau terbiasa pakai terminal)
+Sama seperti sebelumnya — buka URL `*.pages.dev` (atau domain sekolah kalau
+sudah diatur custom domain), lalu:
+- TV: `chrome --kiosk <url>`
+- HP/tablet/desktop: menu browser → "Tambahkan ke layar Utama" / ikon install
 
-Perlu Node.js terinstal di komputer. Dari folder paket ini, jalankan:
-```
-npx wrangler pages deploy . --project-name=berita-muhada
-```
-Wrangler akan minta login ke akun Cloudflare Anda (buka browser otomatis),
-lalu meng-upload semua file TERMASUK folder `functions/` dengan benar.
+## Fitur
 
-## 3. Pasang di TV/monitor lobi (kiosk)
+- **20 artikel terbaru**, tiap artikel bisa punya sampai 5 foto (foto utama +
+  foto di isi artikel), berganti otomatis tiap 6 detik
+- **Gambar unik** — foto yang sama tidak akan tampil dua kali walau dipakai
+  di beberapa artikel
+- **Jam & tanggal** di kanan atas, auto-update
+- **QR code** di tiap slide — pakai LINK PENDEK buatan sendiri (`/r/<id>`,
+  bukan URL artikel yang panjang) supaya kodenya renggang dan gampang
+  di-scan dari jarak jauh (misal dari kursi tunggu di lobi)
+- **Atur posisi foto secara manual** (pengganti fitur auto-crop yang lama —
+  auto-crop dihapus karena hasilnya kadang tidak akurat)
 
-- Sambungkan mini PC / laptop bekas / Raspberry Pi ke TV
-- Buka Chrome, akses `https://berita-muhada.pages.dev` (sesuaikan dengan nama project Anda)
-- Aktifkan mode kiosk: `chrome --kiosk https://berita-muhada.pages.dev`
-- Set browser untuk otomatis membuka halaman ini setiap kali perangkat menyala
+## Cara pakai fitur "Atur posisi foto" (khusus admin)
 
-## 4. Install di HP / Tablet / Komputer
+1. **Tekan-tahan** tulisan "SMK Muhammadiyah Todanan" di kiri atas selama
+   ±1 detik
+2. Masukkan PIN — default: `1234` (**ganti ini!** — cari `editPin: '1234'`
+   di `index.html` dan ganti dengan PIN Anda sendiri sebelum deploy)
+3. Panel kecil muncul di kiri bawah → klik **"Atur posisi foto"**
+4. **Geser foto** (drag pakai jari di HP/tablet, atau klik-tarik pakai mouse
+   di desktop) sampai komposisinya pas
+5. Klik **Simpan** — posisi ini otomatis dipisah untuk kategori "HP" atau
+   "Desktop/Tablet" tergantung perangkat yang sedang Anda pakai saat menyimpan
+   (lebar layar di bawah 768px dianggap HP)
+6. Pakai tombol **◀ Sebelumnya / Berikutnya ▶** di toolbar untuk pindah ke
+   foto lain tanpa keluar dari mode edit
+7. Klik **Selesai** untuk kembali ke slideshow normal
 
-- Buka alamat slider (`https://berita-muhada.pages.dev`) di Chrome/Safari
-- Chrome Android: menu (⋮) → "Tambahkan ke layar Utama" / "Install app"
-- Safari iOS: tombol Share → "Tambah ke Layar Utama"
-- Chrome Desktop: ikon install (⊕) di address bar
+Catatan: kalau KV belum diaktifkan (lihat langkah 3 di atas), posisi yang
+disimpan cuma berlaku di perangkat itu — untuk berlaku di semua perangkat,
+aktifkan KV dulu.
 
-Setelah di-install, ikon aplikasi akan muncul seperti aplikasi native dan
-terbuka fullscreen tanpa address bar.
+## Cara menyembunyikan QR code
 
-## Cara memastikan proxy-nya sudah aktif
+Di panel admin yang sama (tekan-tahan logo + PIN), ada checkbox
+**"Tampilkan kode QR di layar ini"** — matikan untuk menyembunyikan QR di
+perangkat/layar itu. Ini pengaturan per-perangkat (localStorage), jadi bisa
+beda-beda: misalnya QR ditampilkan di TV lobi tapi disembunyikan di HP.
 
-Setelah deploy (Cara A atau B di atas), buka langsung:
-```
-https://berita-muhada.pages.dev/api/articles
-```
-Kalau muncul data JSON artikel → proxy aktif, slider akan bekerja.
-Kalau muncul halaman 404 "page not found" → berarti folder `functions/`
-tidak ikut ter-deploy (cek lagi apakah foldernya benar-benar ada di repo
-GitHub / ikut ter-upload oleh Wrangler).
+## Pengaturan lain (di bagian atas `index.html`, objek `CONFIG`)
 
-## (Opsional) Kalau ingin domain sendiri, bukan *.pages.dev
-
-Cloudflare Pages mendukung custom domain gratis — misalnya
-`tv.smkmuhammadiyahtodanan.sch.id` — asalkan DNS domain sekolah dikelola atau
-bisa diarahkan lewat Cloudflare. Ini opsional; `*.pages.dev` bawaan sudah
-cukup untuk kiosk TV dan install PWA.
-
-## Cara kerja & pengaturan
-
-- Slider meminta data ke `/api/articles` (proxy di edge Cloudflare), yang
-  meneruskan ke `/wp-json/wp/v2/posts?per_page=20&_embed` di website sekolah
-- Slider otomatis maju tiap **8 detik** (bisa diubah di `index.html`,
-  cari `slideDurationMs`)
-- Data disegarkan otomatis tiap **15 menit** tanpa reload halaman
-  (`refreshDataEveryMs`), dan di edge Cloudflare hasilnya di-cache 10 menit
-  (atur di `functions/api/articles.js`, `cacheTtl`)
-- Kalau internet putus, aplikasi tetap menampilkan artikel terakhir yang
-  tersimpan di cache
-- Bisa navigasi manual: tap kiri/kanan layar, swipe, atau tombol panah kiri/kanan
-- Artikel tanpa foto akan tetap tampil dengan latar warna biru tua brand
-  Muhada Berdaya, bukan layar kosong
-
-## Kalau mau ganti warna atau kecepatan slide
-
-Semua token warna ada di bagian atas `index.html`:
-```css
---biru-tua:#1B2E6E;
---biru-terang:#1A6FE8;
---oranye:#F28C00;
-```
+- `imageDurationMs` — lama tampil tiap foto (default 6000 = 6 detik)
+- `maxImagesPerArticle` — maksimal foto per artikel (default 5)
+- `mobileBreakpoint` — lebar layar (px) pembeda kategori HP vs Desktop (default 768)
+- `editPin` — PIN untuk membuka panel admin — **wajib diganti dari default**
+- `refreshDataEveryMs` — seberapa sering data artikel disegarkan (default 15 menit)

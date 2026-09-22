@@ -1,5 +1,5 @@
-const SHELL_CACHE = 'muhada-shell-v2';
-const API_CACHE = 'muhada-api-v2';
+const SHELL_CACHE = 'muhada-shell-v3';
+const API_CACHE = 'muhada-api-v3';
 
 const SHELL_FILES = [
   './index.html',
@@ -43,6 +43,19 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => caches.match(event.request))
     );
+    return;
+  }
+
+  // Posisi foto manual: selalu ambil versi terbaru dari server (jangan
+  // sampai perangkat lain melihat posisi yang sudah usang).
+  if (url.pathname.startsWith('/api/position')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  // Link pendek QR (/r/...): biarkan lewat langsung, jangan di-cache —
+  // ini cuma redirect tipis, bukan konten yang perlu offline.
+  if (url.pathname.startsWith('/r/')) {
     return;
   }
 
