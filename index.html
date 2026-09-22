@@ -404,7 +404,6 @@ const CONFIG = {
   // Diambil lewat Cloudflare Pages Function (functions/api/articles.js),
   // bukan langsung ke WordPress, supaya tidak kena blokir CORS browser.
   apiUrl: '/api/articles',
-  imageProxyUrl: '/api/image?url=', // proxy gambar (perbaikan hotlink/URL relatif)
   positionApiUrl: '/api/position',  // penyimpanan posisi foto manual (perlu KV, lihat README)
   wpOrigin: 'https://smkmuhammadiyahtodanan.sch.id', // untuk melengkapi URL gambar yang ditulis relatif
   imageDurationMs: 6000,        // lama tampil tiap FOTO (bukan per artikel)
@@ -412,10 +411,9 @@ const CONFIG = {
   mobileBreakpoint: 768,        // di bawah lebar ini (px) dianggap "HP", di atasnya "Desktop/Tablet"
   editPin: '1234',              // GANTI ini dengan PIN Anda sendiri sebelum deploy
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
-  cacheKey: 'muhada-slider-articles-v3',
+  cacheKey: 'muhada-slider-articles-v4',
   positionCacheKey: 'muhada-slider-positions-v1',
-  qrVisibleKey: 'muhada-slider-qr-visible-v1',
-  validatedImagesKey: 'muhada-slider-validated-images-v1'
+  qrVisibleKey: 'muhada-slider-qr-visible-v1'
 };
 
 let articles = [];   // data mentah per artikel (judul, tanggal, daftar gambar)
@@ -432,17 +430,6 @@ try{ savedPositions = JSON.parse(localStorage.getItem(CONFIG.positionCacheKey) |
 
 let qrVisible = true;
 try{ const v = localStorage.getItem(CONFIG.qrVisibleKey); if (v !== null) qrVisible = v === '1'; }catch(e){ /* pakai default */ }
-
-// Gambar yang SUDAH TERBUKTI berhasil dimuat sebelumnya — begitu masuk daftar
-// ini, tidak perlu dicek ulang tiap refresh. Ini penting supaya satu momen
-// jaringan lambat/putus sesaat saat refresh berkala tidak salah membuang
-// foto yang sebenarnya baik-baik saja.
-let validatedImages = new Set();
-try{ validatedImages = new Set(JSON.parse(localStorage.getItem(CONFIG.validatedImagesKey) || '[]')); }catch(e){ validatedImages = new Set(); }
-
-function saveValidatedImages(){
-  try{ localStorage.setItem(CONFIG.validatedImagesKey, JSON.stringify(Array.from(validatedImages))); }catch(e){}
-}
 
 let kvActive = null; // null = belum dicek, true/false setelah loadSavedPositions() jalan
 
@@ -492,13 +479,11 @@ function formatDate(iso){
   }catch(e){ return ''; }
 }
 
-function proxyImage(url){
-  return url ? CONFIG.imageProxyUrl + encodeURIComponent(url) : null;
-}
-
 // Ubah URL relatif ("/wp-content/uploads/x.jpg") jadi URL lengkap terhadap
 // domain website sekolah — beberapa artikel lama kadang menyimpan gambar
 // dengan path relatif, yang kalau dibiarkan akan gagal dimuat sama sekali.
+// Gambar dimuat LANGSUNG dari WordPress (tanpa proxy) — ini yang terbukti
+// paling andal.
 function resolveImageUrl(raw){
   if (!raw) return null;
   raw = raw.trim();
@@ -506,8 +491,6 @@ function resolveImageUrl(raw){
   if (raw.startsWith('data:')) return null; // placeholder base64 dari lazy-load, bukan gambar asli
   try{
     const url = new URL(raw, CONFIG.wpOrigin);
-    // Atribut kosong ("") akan resolve jadi domain polos tanpa path — itu
-    // bukan gambar sungguhan, bukan hasil yang valid untuk ditampilkan.
     if (!url.pathname || url.pathname === '/') return null;
     return url.href;
   }catch(e){
@@ -519,15 +502,14 @@ function extractImages(post){
   const images = [];
 
   // 1. Foto unggulan (featured image) artikel — diutamakan tampil duluan.
-  //    Pakai ukuran "large" bawaan WordPress (paling stabil), fallback ke
-  //    file asli kalau ukuran itu tidak tersedia.
+  //    Pakai ukuran "large" bawaan WordPress, fallback ke file asli.
   const media = post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0];
   if (media) {
     const rawSrc = (media.media_details && media.media_details.sizes && media.media_details.sizes.large)
       ? media.media_details.sizes.large.source_url
       : media.source_url;
     const resolved = resolveImageUrl(rawSrc);
-    if (resolved) images.push(proxyImage(resolved));
+    if (resolved) images.push(resolved);
   }
 
   // 2. Semua gambar lain yang ada di isi/body artikel.
@@ -535,17 +517,8 @@ function extractImages(post){
     const html = (post.content && post.content.rendered) || '';
     const doc = new DOMParser().parseFromString(html, 'text/html');
     doc.querySelectorAll('img').forEach(img => {
-      // Banyak tema/plugin lazy-load menyimpan URL asli di salah satu atribut
-      // data-* ini, dan menyisakan placeholder kosong/buram di "src".
-      const raw =
-        img.getAttribute('data-lazy-src') ||
-        img.getAttribute('data-src') ||
-        img.getAttribute('data-original') ||
-        img.getAttribute('src');
-
-      const resolved = resolveImageUrl(raw);
-      const src = proxyImage(resolved);
-      if (src && !images.includes(src)) images.push(src);
+      const resolved = resolveImageUrl(img.getAttribute('src'));
+      if (resolved && !images.includes(resolved)) images.push(resolved);
     });
   }catch(e){ /* abaikan kalau parsing gagal */ }
 
@@ -594,57 +567,6 @@ function buildQueue(articleList){
   return q;
 }
 
-/* ============ Validasi gambar sebelum ditampilkan ============
-   Alih-alih menampilkan slide biru kosong kalau sebuah gambar gagal
-   dimuat, kita cek dulu SETIAP gambar benar-benar bisa dimuat browser
-   sebelum masuk ke antrean slide. Gambar yang gagal otomatis dibuang —
-   artikel akan tetap tampil pakai foto lain yang berhasil, atau tanpa
-   foto sama sekali kalau ternyata semuanya gagal (baru di situ fallback
-   warna biru dianggap wajar, bukan bug). */
-function preloadImage(src, timeoutMs){
-  return new Promise((resolve) => {
-    let done = false;
-    const img = new Image();
-    const timer = setTimeout(() => {
-      if (!done){ done = true; resolve(false); }
-    }, timeoutMs);
-    img.onload = () => {
-      if (!done){ done = true; clearTimeout(timer); resolve(true); }
-    };
-    img.onerror = () => {
-      if (!done){ done = true; clearTimeout(timer); resolve(false); }
-    };
-    img.src = src;
-  });
-}
-
-async function validateAllImages(articleList){
-  await Promise.all(articleList.map(async (a) => {
-    if (!a.images.length) return;
-    const results = await Promise.all(a.images.map(async (src) => {
-      // Sudah pernah terbukti berhasil dimuat -> percayai, jangan cek ulang.
-      if (validatedImages.has(src)) return true;
-
-      // Gambar baru: coba sampai 2 kali (dengan timeout segar tiap percobaan)
-      // sebelum benar-benar dianggap gagal — mengurangi risiko satu momen
-      // jaringan lambat dikira gambar rusak.
-      let ok = await preloadImage(src, 8000);
-      if (!ok) ok = await preloadImage(src, 8000);
-
-      if (ok) validatedImages.add(src);
-      return ok;
-    }));
-
-    const failed = a.images.filter((src, i) => !results[i]);
-    if (failed.length){
-      failed.forEach(src => console.warn('[slider] Gambar dibuang (gagal 2x percobaan):', src, '— artikel:', a.title));
-    }
-    a.images = a.images.filter((src, i) => results[i]);
-  }));
-  saveValidatedImages();
-  return articleList;
-}
-
 /* ============ Ambil data dari WordPress ============ */
 async function fetchArticles(){
   const res = await fetch(CONFIG.apiUrl, { cache:'no-store' });
@@ -656,12 +578,11 @@ async function fetchArticles(){
 
 async function loadData(isBackgroundRefresh){
   try{
-    let fresh = await fetchArticles();
+    const fresh = await fetchArticles();
     if (fresh.length === 0){
       if (!isBackgroundRefresh) showState('empty');
       return;
     }
-    fresh = await validateAllImages(fresh);
     articles = fresh;
     localStorage.setItem(CONFIG.cacheKey, JSON.stringify({ savedAt:Date.now(), articles }));
     if (!isBackgroundRefresh) {
@@ -799,11 +720,6 @@ function renderSlides(preserveIndex){
       slide.style.backgroundImage = `url("${s.image}")`;
       const pos = getPositionFor(s.image);
       if (pos) slide.style.backgroundPosition = pos;
-      // Diagnostik: kalau gambar gagal dimuat, catat di console (F12) —
-      // membantu membedakan "memang tidak ada fotonya" vs "gagal diambil".
-      const probe = new Image();
-      probe.onerror = () => console.warn('[slider] Gagal memuat gambar:', s.image, '— artikel:', s.title);
-      probe.src = s.image;
     }
     slide.innerHTML = `
       <div class="slide-content">

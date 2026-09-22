@@ -1,5 +1,5 @@
-const SHELL_CACHE = 'muhada-shell-v3';
-const API_CACHE = 'muhada-api-v3';
+const SHELL_CACHE = 'muhada-shell-v4';
+const API_CACHE = 'muhada-api-v4';
 
 const SHELL_FILES = [
   './index.html',
@@ -59,21 +59,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Proxy gambar: cache-first (gambar jarang berubah), supaya lebih cepat
-  // dan tetap bisa tampil kalau koneksi sedang putus.
-  if (url.pathname.startsWith('/api/image')) {
-    event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached;
-        return fetch(event.request).then((res) => {
-          const clone = res.clone();
-          caches.open(API_CACHE).then((cache) => cache.put(event.request, clone));
-          return res;
-        });
-      })
-    );
-    return;
-  }
+  // Foto dimuat LANGSUNG dari domain WordPress (bukan lewat proxy lagi),
+  // jadi tidak ikut dicegat/di-cache di sini — biarkan browser menanganinya
+  // sendiri (browser sudah punya cache HTTP normal untuk itu).
 
   // App shell: cache-first.
   if (SHELL_FILES.some((f) => event.request.url.endsWith(f.replace('./', '')))) {
