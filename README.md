@@ -81,15 +81,20 @@ sudah diatur custom domain), lalu:
    di `index.html` dan ganti dengan PIN Anda sendiri sebelum deploy)
 3. Panel kecil muncul di kiri bawah → klik **"Atur posisi / hapus foto"**
 4. **Geser foto** (drag pakai jari di HP/tablet, atau klik-tarik pakai mouse
-   di desktop) sampai komposisinya pas, lalu klik **Simpan** — posisi ini
-   otomatis dipisah untuk kategori "HP" atau "Desktop/Tablet" tergantung
-   perangkat yang sedang Anda pakai saat menyimpan (lebar layar di bawah
-   768px dianggap HP)
-5. Kalau foto itu memang tidak ingin ditampilkan sama sekali, klik
+   di desktop) sampai komposisinya pas — posisi ini otomatis dipisah untuk
+   kategori "HP" atau "Desktop/Tablet" tergantung perangkat yang sedang
+   Anda pakai (lebar layar di bawah 768px dianggap HP)
+5. Pakai tombol **◀ Sebelumnya / Berikutnya ▶** untuk pindah ke foto lain
+   dan geser lagi — **tidak perlu klik Simpan tiap foto**, setiap geseran
+   otomatis "ditandai" dan tombol Simpan akan menunjukkan jumlahnya, misalnya
+   **"Simpan Semua (5)"**
+6. Setelah semua foto yang mau diatur sudah digeser, baru klik
+   **Simpan Semua** sekali — semua perubahan terkirim dalam satu kali proses
+7. Kalau foto tertentu memang tidak ingin ditampilkan sama sekali, klik
    **🗑 Hapus foto ini** — akan ada konfirmasi dulu sebelum benar-benar dihapus
-6. Pakai tombol **◀ Sebelumnya / Berikutnya ▶** di toolbar untuk pindah ke
-   foto lain tanpa keluar dari mode edit
-7. Klik **Selesai** untuk kembali ke slideshow normal
+   (ini terpisah dari Simpan Semua, langsung berlaku begitu dikonfirmasi)
+8. Klik **Selesai** untuk kembali ke slideshow normal — kalau masih ada
+   perubahan yang belum disimpan, akan ada peringatan dulu
 
 Catatan: kalau KV belum diaktifkan (lihat bagian 3 di atas), posisi dan
 foto yang dihapus cuma berlaku di perangkat itu saja — untuk berlaku di

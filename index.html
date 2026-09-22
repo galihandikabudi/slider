@@ -438,6 +438,11 @@ let adminUnlocked = false;
 let savedPositions = {};
 try{ savedPositions = JSON.parse(localStorage.getItem(CONFIG.positionCacheKey) || '{}'); }catch(e){ savedPositions = {}; }
 
+// Perubahan posisi yang BELUM disimpan ke server — diisi tiap kali admin
+// menggeser satu foto di mode edit, dikumpulkan dulu, baru dikirim semua
+// sekaligus (satu request) begitu klik "Simpan Semua".
+let pendingPositions = {};
+
 // Foto yang sudah "dihapus" lewat mode edit — dikecualikan dari slider.
 let hiddenImages = {};
 try{ hiddenImages = JSON.parse(localStorage.getItem(CONFIG.hiddenCacheKey) || '{}'); }catch(e){ hiddenImages = {}; }
@@ -733,11 +738,33 @@ function updateKvStatusLine(){
   }
 }
 
-async function savePosition(imageUrl, position){
-  const device = getDeviceCategory();
-  if (!savedPositions[imageUrl]) savedPositions[imageUrl] = {};
-  savedPositions[imageUrl][device] = position;
+// Tandai perubahan posisi satu foto sebagai "belum disimpan" — dikumpulkan
+// dulu di memori, belum dikirim ke server. Dipanggil tiap kali admin selesai
+// menggeser (atau reset) satu foto.
+function stagePendingPosition(imageUrl, position){
+  if (!imageUrl) return;
+  pendingPositions[imageUrl] = { device: getDeviceCategory(), position };
+  updateSaveButtonLabel();
+}
 
+function updateSaveButtonLabel(){
+  const count = Object.keys(pendingPositions).length;
+  editSaveBtn.textContent = count > 0 ? `Simpan Semua (${count})` : 'Simpan';
+}
+
+// Kirim SEMUA perubahan yang tertunda dalam satu request sekaligus.
+async function saveAllPendingPositions(){
+  const entries = Object.entries(pendingPositions).map(([imageUrl, v]) => ({
+    imageUrl, device: v.device, position: v.position
+  }));
+  if (entries.length === 0) return 'Tidak ada perubahan untuk disimpan.';
+
+  // Simpan ke memori + lokal dulu supaya langsung berlaku di perangkat ini
+  // walau request ke server gagal.
+  entries.forEach(({ imageUrl, device, position }) => {
+    if (!savedPositions[imageUrl]) savedPositions[imageUrl] = {};
+    savedPositions[imageUrl][device] = position;
+  });
   let localSaveOk = true;
   try{ localStorage.setItem(CONFIG.positionCacheKey, JSON.stringify(savedPositions)); }
   catch(e){ localSaveOk = false; }
@@ -746,19 +773,25 @@ async function savePosition(imageUrl, position){
     const res = await fetch(CONFIG.positionApiUrl, {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ imageUrl, device, position })
+      body: JSON.stringify({ batch: entries })
     });
     if (res.ok){
       kvActive = true;
       updateKvStatusLine();
-      return 'Tersimpan — akan tampil di semua perangkat.';
+      pendingPositions = {};
+      updateSaveButtonLabel();
+      return `${entries.length} foto tersimpan — akan tampil di semua perangkat.`;
     }
+    if (localSaveOk) pendingPositions = {};
+    updateSaveButtonLabel();
     return localSaveOk
-      ? 'Tersimpan di perangkat ini saja (server belum diatur — lihat README).'
-      : 'TIDAK TERSIMPAN — server belum diatur (KV) DAN penyimpanan lokal di browser ini tidak tersedia. Aktifkan KV dulu (lihat README, bagian 3) supaya bisa tersimpan.';
+      ? `${entries.length} foto tersimpan di perangkat ini saja (server belum diatur — lihat README).`
+      : 'TIDAK TERSIMPAN — server belum diatur (KV) DAN penyimpanan lokal di browser ini tidak tersedia.';
   }catch(e){
+    if (localSaveOk) pendingPositions = {};
+    updateSaveButtonLabel();
     return localSaveOk
-      ? 'Tersimpan di perangkat ini saja (sedang offline).'
+      ? `${entries.length} foto tersimpan di perangkat ini saja (sedang offline).`
       : 'TIDAK TERSIMPAN — sedang offline DAN penyimpanan lokal di browser ini tidak tersedia.';
   }
 }
@@ -1017,7 +1050,11 @@ function attachDragHandlers(){
     el.style.backgroundPosition = newX.toFixed(1) + '% ' + newY.toFixed(1) + '%';
   }
   function onUp(e){
-    dragging = false;
+    if (dragging){
+      dragging = false;
+      const s = queue[currentIndex];
+      if (s && s.image) stagePendingPosition(s.image, el.style.backgroundPosition);
+    }
     try{ el.releasePointerCapture(e.pointerId); }catch(err){}
   }
 
@@ -1044,10 +1081,17 @@ function enterEditMode(){
   document.body.classList.add('edit-mode');
   editToolbar.classList.remove('hidden');
   editDeviceLabel.textContent = getDeviceCategory() === 'mobile' ? 'HP' : 'Desktop / Tablet';
+  updateSaveButtonLabel();
   attachDragHandlers();
 }
 
 function exitEditMode(){
+  const count = Object.keys(pendingPositions).length;
+  if (count > 0 && !confirm(`Ada ${count} perubahan posisi yang belum disimpan. Keluar tanpa menyimpan?`)) {
+    return;
+  }
+  pendingPositions = {}; // batalkan perubahan yang belum disimpan
+  updateSaveButtonLabel();
   editMode = false;
   detachDragHandlers();
   document.body.classList.remove('edit-mode');
@@ -1060,17 +1104,19 @@ editNextBtn.addEventListener('click', () => { detachDragHandlers(); nextSlide();
 
 editResetBtn.addEventListener('click', () => {
   const el = getActiveSlideEl();
-  if (el) el.style.backgroundPosition = '50% 50%';
+  const s = queue[currentIndex];
+  if (!el) return;
+  el.style.backgroundPosition = '50% 50%';
+  if (s && s.image) stagePendingPosition(s.image, '50% 50%');
 });
 
 editSaveBtn.addEventListener('click', async () => {
-  const el = getActiveSlideEl();
-  const s = queue[currentIndex];
-  if (!el || !s || !s.image) { alert('Slide ini tidak punya foto untuk diatur.'); return; }
-  const pos = el.style.backgroundPosition || '50% 50%';
+  editSaveBtn.disabled = true;
+  const prevLabel = editSaveBtn.textContent;
   editSaveBtn.textContent = 'Menyimpan…';
-  const msg = await savePosition(s.image, pos);
-  editSaveBtn.textContent = 'Simpan';
+  const msg = await saveAllPendingPositions();
+  editSaveBtn.disabled = false;
+  updateSaveButtonLabel();
   alert(msg);
 });
 
@@ -1078,6 +1124,9 @@ editDeleteBtn.addEventListener('click', async () => {
   const s = queue[currentIndex];
   if (!s || !s.image) { alert('Slide ini tidak punya foto untuk dihapus.'); return; }
   if (!confirm('Hapus foto ini dari slider? Foto tidak akan tampil lagi (bisa dipulihkan lewat panel admin).')) return;
+
+  delete pendingPositions[s.image]; // batalkan perubahan posisi tertunda untuk foto yang dihapus
+  updateSaveButtonLabel();
 
   detachDragHandlers();
   editDeleteBtn.textContent = 'Menghapus…';
