@@ -408,6 +408,7 @@ const CONFIG = {
   wpOrigin: 'https://smkmuhammadiyahtodanan.sch.id', // untuk melengkapi URL gambar yang ditulis relatif
   imageDurationMs: 6000,        // lama tampil tiap FOTO (bukan per artikel)
   maxImagesPerArticle: 5,       // batas jumlah foto yang diambil dari satu artikel
+  maxImageWidth: 1920,          // batas lebar gambar (px) — cukup tajam (setara Full HD), tanpa boros data
   mobileBreakpoint: 768,        // di bawah lebar ini (px) dianggap "HP", di atasnya "Desktop/Tablet"
   editPin: '1234',              // GANTI ini dengan PIN Anda sendiri sebelum deploy
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
@@ -501,13 +502,49 @@ function resolveImageUrl(raw){
 function extractImages(post){
   const images = [];
 
+  // Pilih file ukuran TERBESAR yang tersedia TAPI tidak melebihi
+  // CONFIG.maxImageWidth — cukup tajam untuk fullscreen di TV/monitor mana
+  // pun, tanpa mengunduh file mentah/original yang bisa berukuran belasan MB.
+  function pickBestFromSizes(sizesObj, fallbackUrl){
+    let best = null, bestWidth = 0;
+    if (sizesObj){
+      Object.keys(sizesObj).forEach(key => {
+        const s = sizesObj[key];
+        if (s && s.source_url && s.width && s.width <= CONFIG.maxImageWidth && s.width > bestWidth){
+          bestWidth = s.width;
+          best = s.source_url;
+        }
+      });
+    }
+    if (best) return best;
+    // Tidak ada size yang pas di bawah batas -> pakai "large" bawaan WordPress
+    // kalau ada, atau file asli sebagai upaya terakhir.
+    if (sizesObj && sizesObj.large && sizesObj.large.source_url) return sizesObj.large.source_url;
+    return fallbackUrl;
+  }
+
+  function pickBestFromSrcset(srcset, fallbackSrc){
+    if (!srcset) return fallbackSrc;
+    const candidates = srcset.split(',')
+      .map(c => c.trim().split(/\s+/))
+      .filter(c => c[0])
+      .map(c => ({ url: c[0], width: parseInt(c[1]) || 0 }));
+    if (!candidates.length) return fallbackSrc;
+    const underCap = candidates.filter(c => c.width > 0 && c.width <= CONFIG.maxImageWidth);
+    if (underCap.length){
+      underCap.sort((a, b) => b.width - a.width);
+      return underCap[0].url;
+    }
+    // Semua kandidat di srcset melebihi batas -> pilih yang paling kecil
+    // di antaranya (paling mendekati batas), daripada yang paling besar.
+    const withWidth = candidates.filter(c => c.width > 0).sort((a, b) => a.width - b.width);
+    return withWidth.length ? withWidth[0].url : fallbackSrc;
+  }
+
   // 1. Foto unggulan (featured image) artikel — diutamakan tampil duluan.
-  //    Pakai ukuran "large" bawaan WordPress, fallback ke file asli.
   const media = post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0];
   if (media) {
-    const rawSrc = (media.media_details && media.media_details.sizes && media.media_details.sizes.large)
-      ? media.media_details.sizes.large.source_url
-      : media.source_url;
+    const rawSrc = pickBestFromSizes(media.media_details && media.media_details.sizes, media.source_url);
     const resolved = resolveImageUrl(rawSrc);
     if (resolved) images.push(resolved);
   }
@@ -517,7 +554,9 @@ function extractImages(post){
     const html = (post.content && post.content.rendered) || '';
     const doc = new DOMParser().parseFromString(html, 'text/html');
     doc.querySelectorAll('img').forEach(img => {
-      const resolved = resolveImageUrl(img.getAttribute('src'));
+      const rawSrc = img.getAttribute('src');
+      const chosen = pickBestFromSrcset(img.getAttribute('srcset'), rawSrc);
+      const resolved = resolveImageUrl(chosen);
       if (resolved && !images.includes(resolved)) images.push(resolved);
     });
   }catch(e){ /* abaikan kalau parsing gagal */ }
