@@ -414,7 +414,8 @@ const CONFIG = {
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
   cacheKey: 'muhada-slider-articles-v3',
   positionCacheKey: 'muhada-slider-positions-v1',
-  qrVisibleKey: 'muhada-slider-qr-visible-v1'
+  qrVisibleKey: 'muhada-slider-qr-visible-v1',
+  validatedImagesKey: 'muhada-slider-validated-images-v1'
 };
 
 let articles = [];   // data mentah per artikel (judul, tanggal, daftar gambar)
@@ -431,6 +432,17 @@ try{ savedPositions = JSON.parse(localStorage.getItem(CONFIG.positionCacheKey) |
 
 let qrVisible = true;
 try{ const v = localStorage.getItem(CONFIG.qrVisibleKey); if (v !== null) qrVisible = v === '1'; }catch(e){ /* pakai default */ }
+
+// Gambar yang SUDAH TERBUKTI berhasil dimuat sebelumnya — begitu masuk daftar
+// ini, tidak perlu dicek ulang tiap refresh. Ini penting supaya satu momen
+// jaringan lambat/putus sesaat saat refresh berkala tidak salah membuang
+// foto yang sebenarnya baik-baik saja.
+let validatedImages = new Set();
+try{ validatedImages = new Set(JSON.parse(localStorage.getItem(CONFIG.validatedImagesKey) || '[]')); }catch(e){ validatedImages = new Set(); }
+
+function saveValidatedImages(){
+  try{ localStorage.setItem(CONFIG.validatedImagesKey, JSON.stringify(Array.from(validatedImages))); }catch(e){}
+}
 
 let kvActive = null; // null = belum dicek, true/false setelah loadSavedPositions() jalan
 
@@ -582,6 +594,57 @@ function buildQueue(articleList){
   return q;
 }
 
+/* ============ Validasi gambar sebelum ditampilkan ============
+   Alih-alih menampilkan slide biru kosong kalau sebuah gambar gagal
+   dimuat, kita cek dulu SETIAP gambar benar-benar bisa dimuat browser
+   sebelum masuk ke antrean slide. Gambar yang gagal otomatis dibuang —
+   artikel akan tetap tampil pakai foto lain yang berhasil, atau tanpa
+   foto sama sekali kalau ternyata semuanya gagal (baru di situ fallback
+   warna biru dianggap wajar, bukan bug). */
+function preloadImage(src, timeoutMs){
+  return new Promise((resolve) => {
+    let done = false;
+    const img = new Image();
+    const timer = setTimeout(() => {
+      if (!done){ done = true; resolve(false); }
+    }, timeoutMs);
+    img.onload = () => {
+      if (!done){ done = true; clearTimeout(timer); resolve(true); }
+    };
+    img.onerror = () => {
+      if (!done){ done = true; clearTimeout(timer); resolve(false); }
+    };
+    img.src = src;
+  });
+}
+
+async function validateAllImages(articleList){
+  await Promise.all(articleList.map(async (a) => {
+    if (!a.images.length) return;
+    const results = await Promise.all(a.images.map(async (src) => {
+      // Sudah pernah terbukti berhasil dimuat -> percayai, jangan cek ulang.
+      if (validatedImages.has(src)) return true;
+
+      // Gambar baru: coba sampai 2 kali (dengan timeout segar tiap percobaan)
+      // sebelum benar-benar dianggap gagal — mengurangi risiko satu momen
+      // jaringan lambat dikira gambar rusak.
+      let ok = await preloadImage(src, 8000);
+      if (!ok) ok = await preloadImage(src, 8000);
+
+      if (ok) validatedImages.add(src);
+      return ok;
+    }));
+
+    const failed = a.images.filter((src, i) => !results[i]);
+    if (failed.length){
+      failed.forEach(src => console.warn('[slider] Gambar dibuang (gagal 2x percobaan):', src, '— artikel:', a.title));
+    }
+    a.images = a.images.filter((src, i) => results[i]);
+  }));
+  saveValidatedImages();
+  return articleList;
+}
+
 /* ============ Ambil data dari WordPress ============ */
 async function fetchArticles(){
   const res = await fetch(CONFIG.apiUrl, { cache:'no-store' });
@@ -593,11 +656,12 @@ async function fetchArticles(){
 
 async function loadData(isBackgroundRefresh){
   try{
-    const fresh = await fetchArticles();
+    let fresh = await fetchArticles();
     if (fresh.length === 0){
       if (!isBackgroundRefresh) showState('empty');
       return;
     }
+    fresh = await validateAllImages(fresh);
     articles = fresh;
     localStorage.setItem(CONFIG.cacheKey, JSON.stringify({ savedAt:Date.now(), articles }));
     if (!isBackgroundRefresh) {

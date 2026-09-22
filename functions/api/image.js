@@ -1,6 +1,4 @@
-// Proxy gambar dari WordPress, sekaligus menambahkan header CORS supaya
-// gambar bisa dianalisis lewat <canvas> di browser (untuk deteksi titik
-// fokus otomatis / smart-crop) tanpa kena blokir keamanan origin.
+// Proxy gambar dari WordPress, sekaligus menambahkan header CORS.
 // Dipanggil sebagai: /api/image?url=<url gambar asli, sudah di-encode>
 
 const ALLOWED_HOST = 'smkmuhammadiyahtodanan.sch.id';
@@ -12,6 +10,28 @@ const ALLOWED_EXTRA_SUFFIXES = ['.wp.com', '.wordpress.com'];
 function isHostAllowed(hostname){
   if (hostname === ALLOWED_HOST || hostname.endsWith('.' + ALLOWED_HOST)) return true;
   return ALLOWED_EXTRA_SUFFIXES.some(suf => hostname.endsWith(suf));
+}
+
+async function tryFetch(target, withSpoofedHeaders){
+  const headers = withSpoofedHeaders
+    ? {
+        'Referer': 'https://' + ALLOWED_HOST + '/',
+        'User-Agent': 'Mozilla/5.0 (compatible; MuhadaBerdayaSliderProxy/1.0)'
+      }
+    : {}; // sebagian server justru curiga pada Referer/User-Agent custom — coba tanpa itu sebagai percobaan kedua
+
+  const res = await fetch(target, {
+    cf: { cacheTtl: 86400, cacheEverything: true },
+    headers
+  });
+
+  const contentType = res.headers.get('Content-Type') || '';
+  // Sebagian server balas HTTP 200 tapi isinya halaman error HTML (bukan
+  // gambar) — itu tetap harus dianggap gagal, bukan cuma cek status code.
+  if (!res.ok || !contentType.startsWith('image/')) {
+    return { ok: false, status: res.status, contentType };
+  }
+  return { ok: true, response: res };
 }
 
 export async function onRequestGet(context) {
@@ -34,24 +54,22 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const upstream = await fetch(target, {
-      cf: { cacheTtl: 86400, cacheEverything: true },
-      headers: {
-        // Meniru permintaan wajar dari browser di situs sendiri, supaya
-        // tidak kena proteksi hotlink di server WordPress.
-        'Referer': 'https://' + ALLOWED_HOST + '/',
-        'User-Agent': 'Mozilla/5.0 (compatible; MuhadaBerdayaSliderProxy/1.0)'
-      }
-    });
-
-    if (!upstream.ok) {
-      return new Response('Gagal mengambil gambar dari sumber (HTTP ' + upstream.status + ')', { status: 502 });
+    let result = await tryFetch(target, true);
+    if (!result.ok) {
+      result = await tryFetch(target, false); // percobaan kedua, tanpa header spoofing
     }
 
-    return new Response(upstream.body, {
+    if (!result.ok) {
+      return new Response(
+        'Gagal mengambil gambar dari sumber (HTTP ' + result.status + ', content-type: ' + result.contentType + ')',
+        { status: 502 }
+      );
+    }
+
+    return new Response(result.response.body, {
       status: 200,
       headers: {
-        'Content-Type': upstream.headers.get('Content-Type') || 'image/jpeg',
+        'Content-Type': result.response.headers.get('Content-Type') || 'image/jpeg',
         'Cache-Control': 'public, max-age=86400',
         'Access-Control-Allow-Origin': '*'
       }
