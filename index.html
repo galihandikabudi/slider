@@ -14,6 +14,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/smartcrop@2.0.5/smartcrop.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   :root{
     --biru-tua:#1B2E6E;
@@ -101,12 +103,16 @@
     text-wrap:balance;
   }
 
-  /* ---------- Top bar: wordmark + progress ---------- */
+  /* ---------- Top bar: wordmark + jam ---------- */
   .topbar{
     position:absolute;
     top:0; left:0; right:0;
     z-index:10;
     padding:4.5vh 6vw 0;
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:4vw;
   }
   .wordmark{
     display:flex;
@@ -117,32 +123,68 @@
     font-weight:600;
     font-size:clamp(14px,1.4vw,19px);
     text-shadow:0 2px 12px rgba(0,0,0,.45);
-    margin-bottom:2.4vh;
+    white-space:nowrap;
   }
   .wordmark .dot{
     width:9px; height:9px; border-radius:50%;
     background:var(--oranye);
   }
 
-  .progress-track{
+  .clock{
+    text-align:right;
+    text-shadow:0 2px 12px rgba(0,0,0,.45);
+  }
+  .clock-time{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:clamp(16px,1.9vw,28px);
+    color:#fff;
+    line-height:1.15;
+  }
+  .clock-date{
+    font-size:clamp(11px,1.05vw,14px);
+    color:rgba(255,255,255,.78);
+  }
+
+  /* ---------- QR code baca berita ---------- */
+  .qr-box{
+    position:absolute;
+    right:6vw;
+    bottom:8vh;
+    background:#fff;
+    border-radius:14px;
+    padding:10px 10px 8px;
     display:flex;
-    gap:6px;
+    flex-direction:column;
+    align-items:center;
+    gap:5px;
+    box-shadow:0 12px 30px rgba(0,0,0,.4);
+    z-index:3;
   }
-  .progress-seg{
-    flex:1;
-    height:3px;
-    background:rgba(255,255,255,.28);
-    border-radius:3px;
-    overflow:hidden;
+  .qr-box .qr-canvas-wrap{
+    width:clamp(64px,7vw,96px);
+    height:clamp(64px,7vw,96px);
+    display:flex;
+    align-items:center;
+    justify-content:center;
   }
-  .progress-seg .fill{
-    height:100%;
-    width:0%;
-    background:var(--biru-terang);
-    border-radius:3px;
+  .qr-box .qr-canvas-wrap img,
+  .qr-box .qr-canvas-wrap canvas{
+    width:100% !important;
+    height:100% !important;
   }
-  .progress-seg.done .fill{ width:100%; background:var(--oranye); }
-  .progress-seg.filling .fill{ transition:width linear; }
+  .qr-box .qr-label{
+    font-family:'Inter',sans-serif;
+    font-size:10.5px;
+    font-weight:600;
+    color:var(--biru-tua);
+    text-align:center;
+    max-width:96px;
+    line-height:1.25;
+  }
+  @media (max-width:640px){
+    .qr-box{ right:5vw; bottom:auto; top:14vh; padding:8px 8px 6px; }
+  }
 
   /* ---------- Tap zones for manual nav ---------- */
   .navzone{
@@ -200,7 +242,10 @@
 
   <div class="topbar">
     <div class="wordmark"><span class="dot"></span>SMK Muhammadiyah Todanan</div>
-    <div class="progress-track" id="progressTrack"></div>
+    <div class="clock">
+      <div class="clock-time" id="clockTime">--:--</div>
+      <div class="clock-date" id="clockDate">&nbsp;</div>
+    </div>
   </div>
 
   <div id="slides"></div>
@@ -233,10 +278,12 @@ const CONFIG = {
   // Diambil lewat Cloudflare Pages Function (functions/api/articles.js),
   // bukan langsung ke WordPress, supaya tidak kena blokir CORS browser.
   apiUrl: '/api/articles',
+  imageProxyUrl: '/api/image?url=', // dipakai supaya foto bisa dianalisis kanvas (lihat computeFocalPoint)
   imageDurationMs: 6000,        // lama tampil tiap FOTO (bukan per artikel)
   maxImagesPerArticle: 5,       // batas jumlah foto yang diambil dari satu artikel
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
-  cacheKey: 'muhada-slider-articles-v2'
+  cacheKey: 'muhada-slider-articles-v2',
+  focalCacheKey: 'muhada-slider-focal-v1'
 };
 
 let articles = [];   // data mentah per artikel (judul, tanggal, daftar gambar)
@@ -244,11 +291,17 @@ let queue = [];      // hasil "diratakan": satu entri per foto, judul artikel bi
 let currentIndex = 0;
 let slideTimer = null;
 
+// Titik fokus tiap gambar yang sudah dihitung (persisten lintas sesi/reboot TV,
+// supaya tidak perlu dianalisis ulang tiap kali halaman dibuka).
+let focalCache = {};
+try{ focalCache = JSON.parse(localStorage.getItem(CONFIG.focalCacheKey) || '{}'); }catch(e){ focalCache = {}; }
+
 const slidesEl = document.getElementById('slides');
-const progressTrackEl = document.getElementById('progressTrack');
 const loadingScreen = document.getElementById('loadingScreen');
 const errorScreen = document.getElementById('errorScreen');
 const emptyScreen = document.getElementById('emptyScreen');
+const clockTimeEl = document.getElementById('clockTime');
+const clockDateEl = document.getElementById('clockDate');
 
 function decodeHtml(html){
   const txt = document.createElement('textarea');
@@ -262,16 +315,38 @@ function formatDate(iso){
   }catch(e){ return ''; }
 }
 
+function proxyImage(url){
+  return url ? CONFIG.imageProxyUrl + encodeURIComponent(url) : null;
+}
+
+// Pilih versi gambar dengan resolusi PALING TINGGI yang tersedia di WordPress
+// (bandingkan semua ukuran terdaftar + file aslinya), supaya detailnya
+// maksimal saat ditampilkan fullscreen di TV/layar besar.
+function pickHighestResUrl(media){
+  let bestUrl = media.source_url;
+  let bestWidth = (media.media_details && media.media_details.width) || 0;
+  const sizes = media.media_details && media.media_details.sizes;
+  if (sizes){
+    Object.keys(sizes).forEach(key => {
+      const s = sizes[key];
+      if (s && s.source_url && s.width && s.width > bestWidth){
+        bestWidth = s.width;
+        bestUrl = s.source_url;
+      }
+    });
+  }
+  return bestUrl;
+}
+
 function extractImages(post){
   const images = [];
 
-  // 1. Foto unggulan (featured image) artikel — diutamakan tampil duluan.
+  // 1. Foto unggulan (featured image) artikel — diutamakan tampil duluan,
+  //    resolusi setinggi mungkin.
   const media = post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0];
   if (media) {
-    const src = (media.media_details && media.media_details.sizes && media.media_details.sizes.large)
-      ? media.media_details.sizes.large.source_url
-      : media.source_url;
-    if (src) images.push(src);
+    const src = pickHighestResUrl(media);
+    if (src) images.push(proxyImage(src));
   }
 
   // 2. Semua gambar lain yang ada di isi/body artikel.
@@ -279,7 +354,18 @@ function extractImages(post){
     const html = (post.content && post.content.rendered) || '';
     const doc = new DOMParser().parseFromString(html, 'text/html');
     doc.querySelectorAll('img').forEach(img => {
-      const src = img.getAttribute('src');
+      // WordPress sering menaruh URL resolusi tertinggi di srcset/data-src;
+      // ambil itu dulu kalau ada, baru fallback ke src biasa.
+      let raw = img.getAttribute('data-src') || img.getAttribute('src');
+      const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+      if (srcset){
+        const candidates = srcset.split(',').map(c => c.trim().split(' ')).filter(c => c[0]);
+        if (candidates.length){
+          candidates.sort((a,b) => (parseInt(b[1])||0) - (parseInt(a[1])||0));
+          raw = candidates[0][0];
+        }
+      }
+      const src = proxyImage(raw);
       if (src && !images.includes(src)) images.push(src);
     });
   }catch(e){ /* abaikan kalau parsing gagal */ }
@@ -297,15 +383,21 @@ function extractArticle(post){
 }
 
 /* Meratakan daftar artikel jadi satu entri per FOTO — mirip "Stories":
-   selama masih di artikel yang sama, judul tetap sama, cuma fotonya berganti. */
+   selama masih di artikel yang sama, judul tetap sama, cuma fotonya berganti.
+   Gambar yang sama (mis. dipakai ulang di beberapa artikel) hanya muncul
+   sekali — pada kemunculan pertamanya saja. */
 function buildQueue(articleList){
   const q = [];
+  const usedImages = new Set();
   articleList.forEach(a => {
-    const imgs = a.images.length ? a.images : [null];
+    let imgs = a.images.filter(img => !usedImages.has(img));
+    imgs.forEach(img => usedImages.add(img));
+    if (imgs.length === 0) imgs = [null]; // artikel tetap tampil walau semua fotonya duplikat
     imgs.forEach((image, i) => {
       q.push({
         title: a.title,
         date: a.date,
+        link: a.link,
         image,
         isNewArticle: i === 0
       });
@@ -371,11 +463,72 @@ function showState(state){
   emptyScreen.classList.toggle('hidden', state !== 'empty');
 }
 
+/* ============ Deteksi titik fokus otomatis (smart-crop) ============
+   Menganalisis tiap foto (tepi, warna kulit, area kontras tinggi) untuk
+   menentukan bagian mana yang paling penting, lalu itu yang dijadikan
+   pusat crop — bukan selalu tengah gambar mentah-mentah. */
+function saveFocalCache(){
+  try{ localStorage.setItem(CONFIG.focalCacheKey, JSON.stringify(focalCache)); }catch(e){ /* penuh/diblokir, abaikan */ }
+}
+
+function loadImageEl(src){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function computeFocalPoint(src){
+  if (!src) return null;
+  if (focalCache[src]) return focalCache[src];
+  if (typeof smartcrop === 'undefined') return null; // library gagal dimuat, pakai posisi tengah
+
+  try{
+    const img = await loadImageEl(src);
+    const targetW = Math.max(window.innerWidth || 0, 800);
+    const targetH = Math.max(window.innerHeight || 0, 450);
+    const result = await smartcrop.crop(img, { width: targetW, height: targetH, minScale: 1 });
+    const c = result.topCrop;
+    const cx = c.x + c.width / 2;
+    const cy = c.y + c.height / 2;
+    const xPct = Math.min(100, Math.max(0, (cx / img.naturalWidth) * 100));
+    const yPct = Math.min(100, Math.max(0, (cy / img.naturalHeight) * 100));
+    const pos = xPct.toFixed(1) + '% ' + yPct.toFixed(1) + '%';
+    focalCache[src] = pos;
+    saveFocalCache();
+    return pos;
+  }catch(e){
+    return null; // gambar gagal dimuat/dianalisis -> tetap tampil, posisi default tengah
+  }
+}
+
+function ensureFocalPoint(index){
+  const s = queue[index];
+  if (!s || !s.image) return;
+  const el = document.querySelectorAll('.slide')[index];
+  if (!el || el.dataset.focalDone) return;
+  el.dataset.focalDone = '1';
+  computeFocalPoint(s.image).then(pos => {
+    if (pos) el.style.backgroundPosition = pos;
+  });
+}
+
+// Hitung untuk slide yang sedang tampil + 2 slide berikutnya, supaya saat
+// gilirannya tiba, titik fokusnya sudah siap (tidak "lompat" posisinya).
+function prefetchFocalAround(index){
+  if (queue.length === 0) return;
+  ensureFocalPoint(index);
+  ensureFocalPoint((index + 1) % queue.length);
+  ensureFocalPoint((index + 2) % queue.length);
+}
+
 /* ============ Render slide ============ */
 function renderSlides(preserveIndex){
   queue = buildQueue(articles);
   slidesEl.innerHTML = '';
-  progressTrackEl.innerHTML = '';
 
   queue.forEach((s) => {
     const slide = document.createElement('div');
@@ -389,17 +542,39 @@ function renderSlides(preserveIndex){
           <span class="meta-source">Berita SMK Muhammadiyah Todanan</span>
         </div>
         <div class="title">${s.title}</div>
+      </div>
+      <div class="qr-box">
+        <div class="qr-canvas-wrap"></div>
+        <div class="qr-label">Scan untuk baca berita lengkap</div>
       </div>`;
     slidesEl.appendChild(slide);
-
-    const seg = document.createElement('div');
-    seg.className = 'progress-seg';
-    seg.innerHTML = '<div class="fill"></div>';
-    progressTrackEl.appendChild(seg);
+    renderQrCode(slide, s.link);
   });
 
   if (!preserveIndex || currentIndex >= queue.length) currentIndex = 0;
   updateActiveSlide();
+}
+
+function renderQrCode(slideEl, link){
+  if (!link || typeof QRCode === 'undefined') {
+    const box = slideEl.querySelector('.qr-box');
+    if (box) box.style.display = 'none';
+    return;
+  }
+  const wrap = slideEl.querySelector('.qr-canvas-wrap');
+  try{
+    new QRCode(wrap, {
+      text: link,
+      width: 96,
+      height: 96,
+      colorDark: '#1B2E6E',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  }catch(e){
+    const box = slideEl.querySelector('.qr-box');
+    if (box) box.style.display = 'none';
+  }
 }
 
 function updateActiveSlide(){
@@ -418,35 +593,14 @@ function updateActiveSlide(){
       el.classList.toggle('active', isActive);
     }
   });
-  document.querySelectorAll('.progress-seg').forEach((seg,i)=>{
-    seg.classList.remove('filling');
-    seg.classList.toggle('done', i < currentIndex);
-    const fill = seg.querySelector('.fill');
-    if (i < currentIndex){ fill.style.transition='none'; fill.style.width='100%'; }
-    else if (i === currentIndex){ /* handled in startProgress */ }
-    else { fill.style.transition='none'; fill.style.width='0%'; }
-  });
-}
-
-function startProgress(){
-  const seg = document.querySelectorAll('.progress-seg')[currentIndex];
-  if (!seg) return;
-  const fill = seg.querySelector('.fill');
-  seg.classList.add('filling');
-  fill.style.transition = 'none';
-  fill.style.width = '0%';
-  // force reflow so the transition below actually animates
-  void fill.offsetWidth;
-  fill.style.transition = `width ${CONFIG.imageDurationMs}ms linear`;
-  fill.style.width = '100%';
 }
 
 function goTo(index){
   if (queue.length === 0) return;
   currentIndex = (index + queue.length) % queue.length;
   updateActiveSlide();
-  startProgress();
   resetTimer();
+  prefetchFocalAround(currentIndex);
 }
 
 function nextSlide(){ goTo(currentIndex + 1); }
@@ -461,9 +615,18 @@ function startSlideshow(){
   clearTimeout(slideTimer);
   currentIndex = 0;
   updateActiveSlide();
-  startProgress();
   resetTimer();
+  prefetchFocalAround(currentIndex);
 }
+
+/* ============ Jam & tanggal ============ */
+function updateClock(){
+  const now = new Date();
+  clockTimeEl.textContent = now.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
+  clockDateEl.textContent = now.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+}
+updateClock();
+setInterval(updateClock, 1000 * 30); // cukup tiap 30 detik, jam tidak perlu presisi detik
 
 /* ============ Navigasi manual (tap / swipe) ============ */
 document.getElementById('zonePrev').addEventListener('click', prevSlide);

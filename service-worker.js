@@ -1,5 +1,5 @@
-const SHELL_CACHE = 'muhada-shell-v1';
-const API_CACHE = 'muhada-api-v1';
+const SHELL_CACHE = 'muhada-shell-v2';
+const API_CACHE = 'muhada-api-v2';
 
 const SHELL_FILES = [
   './index.html',
@@ -42,6 +42,22 @@ self.addEventListener('fetch', (event) => {
           return res;
         })
         .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Proxy gambar: cache-first (gambar jarang berubah), supaya lebih cepat
+  // dan tetap bisa tampil kalau koneksi sedang putus.
+  if (url.pathname.startsWith('/api/image')) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached;
+        return fetch(event.request).then((res) => {
+          const clone = res.clone();
+          caches.open(API_CACHE).then((cache) => cache.put(event.request, clone));
+          return res;
+        });
+      })
     );
     return;
   }
