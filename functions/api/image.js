@@ -5,6 +5,15 @@
 
 const ALLOWED_HOST = 'smkmuhammadiyahtodanan.sch.id';
 
+// Beberapa plugin (mis. Jetpack) menyajikan gambar lewat CDN sendiri,
+// bukan langsung dari domain website — izinkan pola yang umum dipakai.
+const ALLOWED_EXTRA_SUFFIXES = ['.wp.com', '.wordpress.com'];
+
+function isHostAllowed(hostname){
+  if (hostname === ALLOWED_HOST || hostname.endsWith('.' + ALLOWED_HOST)) return true;
+  return ALLOWED_EXTRA_SUFFIXES.some(suf => hostname.endsWith(suf));
+}
+
 export async function onRequestGet(context) {
   const { searchParams } = new URL(context.request.url);
   const target = searchParams.get('url');
@@ -20,19 +29,23 @@ export async function onRequestGet(context) {
     return new Response('URL tidak valid', { status: 400 });
   }
 
-  // Hanya izinkan gambar dari domain website sekolah sendiri, supaya proxy
-  // ini tidak bisa disalahgunakan untuk mengambil gambar dari situs lain.
-  if (parsed.hostname !== ALLOWED_HOST && !parsed.hostname.endsWith('.' + ALLOWED_HOST)) {
+  if (!isHostAllowed(parsed.hostname)) {
     return new Response('Domain gambar tidak diizinkan', { status: 403 });
   }
 
   try {
     const upstream = await fetch(target, {
-      cf: { cacheTtl: 86400, cacheEverything: true }
+      cf: { cacheTtl: 86400, cacheEverything: true },
+      headers: {
+        // Meniru permintaan wajar dari browser di situs sendiri, supaya
+        // tidak kena proteksi hotlink di server WordPress.
+        'Referer': 'https://' + ALLOWED_HOST + '/',
+        'User-Agent': 'Mozilla/5.0 (compatible; MuhadaBerdayaSliderProxy/1.0)'
+      }
     });
 
     if (!upstream.ok) {
-      return new Response('Gagal mengambil gambar dari sumber', { status: 502 });
+      return new Response('Gagal mengambil gambar dari sumber (HTTP ' + upstream.status + ')', { status: 502 });
     }
 
     return new Response(upstream.body, {

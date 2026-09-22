@@ -279,11 +279,14 @@ const CONFIG = {
   // bukan langsung ke WordPress, supaya tidak kena blokir CORS browser.
   apiUrl: '/api/articles',
   imageProxyUrl: '/api/image?url=', // dipakai supaya foto bisa dianalisis kanvas (lihat computeFocalPoint)
+  wpOrigin: 'https://smkmuhammadiyahtodanan.sch.id', // untuk melengkapi URL gambar yang ditulis relatif
   imageDurationMs: 6000,        // lama tampil tiap FOTO (bukan per artikel)
   maxImagesPerArticle: 5,       // batas jumlah foto yang diambil dari satu artikel
+  smartCropStrength: 0.7,       // 0 = selalu tengah, 1 = ikuti hasil deteksi 100% (lihat computeFocalPoint)
+  smartCropMargin: 15,          // % — batas seberapa dekat titik fokus boleh ke tepi gambar
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
   cacheKey: 'muhada-slider-articles-v2',
-  focalCacheKey: 'muhada-slider-focal-v1'
+  focalCacheKey: 'muhada-slider-focal-v2'
 };
 
 let articles = [];   // data mentah per artikel (judul, tanggal, daftar gambar)
@@ -319,6 +322,19 @@ function proxyImage(url){
   return url ? CONFIG.imageProxyUrl + encodeURIComponent(url) : null;
 }
 
+// Ubah URL relatif ("/wp-content/uploads/x.jpg") jadi URL lengkap terhadap
+// domain website sekolah — beberapa artikel lama kadang menyimpan gambar
+// dengan path relatif, yang kalau dibiarkan akan gagal dimuat sama sekali.
+function resolveImageUrl(raw){
+  if (!raw) return null;
+  if (raw.startsWith('data:')) return null; // placeholder base64 dari lazy-load, bukan gambar asli
+  try{
+    return new URL(raw, CONFIG.wpOrigin).href;
+  }catch(e){
+    return null;
+  }
+}
+
 // Pilih versi gambar dengan resolusi PALING TINGGI yang tersedia di WordPress
 // (bandingkan semua ukuran terdaftar + file aslinya), supaya detailnya
 // maksimal saat ditampilkan fullscreen di TV/layar besar.
@@ -345,8 +361,8 @@ function extractImages(post){
   //    resolusi setinggi mungkin.
   const media = post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0];
   if (media) {
-    const src = pickHighestResUrl(media);
-    if (src) images.push(proxyImage(src));
+    const resolved = resolveImageUrl(pickHighestResUrl(media));
+    if (resolved) images.push(proxyImage(resolved));
   }
 
   // 2. Semua gambar lain yang ada di isi/body artikel.
@@ -354,18 +370,25 @@ function extractImages(post){
     const html = (post.content && post.content.rendered) || '';
     const doc = new DOMParser().parseFromString(html, 'text/html');
     doc.querySelectorAll('img').forEach(img => {
-      // WordPress sering menaruh URL resolusi tertinggi di srcset/data-src;
-      // ambil itu dulu kalau ada, baru fallback ke src biasa.
-      let raw = img.getAttribute('data-src') || img.getAttribute('src');
-      const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+      // Banyak tema/plugin lazy-load menyimpan URL asli di salah satu atribut
+      // data-* ini, dan menyisakan placeholder kosong/buram di "src".
+      let raw =
+        img.getAttribute('data-lazy-src') ||
+        img.getAttribute('data-src') ||
+        img.getAttribute('data-original') ||
+        img.getAttribute('src');
+
+      const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset') || img.getAttribute('data-lazy-srcset');
       if (srcset){
-        const candidates = srcset.split(',').map(c => c.trim().split(' ')).filter(c => c[0]);
+        const candidates = srcset.split(',').map(c => c.trim().split(/\s+/)).filter(c => c[0]);
         if (candidates.length){
           candidates.sort((a,b) => (parseInt(b[1])||0) - (parseInt(a[1])||0));
           raw = candidates[0][0];
         }
       }
-      const src = proxyImage(raw);
+
+      const resolved = resolveImageUrl(raw);
+      const src = proxyImage(resolved);
       if (src && !images.includes(src)) images.push(src);
     });
   }catch(e){ /* abaikan kalau parsing gagal */ }
@@ -492,10 +515,20 @@ async function computeFocalPoint(src){
     const targetH = Math.max(window.innerHeight || 0, 450);
     const result = await smartcrop.crop(img, { width: targetW, height: targetH, minScale: 1 });
     const c = result.topCrop;
-    const cx = c.x + c.width / 2;
-    const cy = c.y + c.height / 2;
-    const xPct = Math.min(100, Math.max(0, (cx / img.naturalWidth) * 100));
-    const yPct = Math.min(100, Math.max(0, (cy / img.naturalHeight) * 100));
+    const rawXPct = (( c.x + c.width / 2) / img.naturalWidth) * 100;
+    const rawYPct = (( c.y + c.height / 2) / img.naturalHeight) * 100;
+
+    // Redam hasil deteksi supaya tidak terlalu ekstrem kalau tebakannya
+    // meleset (dicampur sebagian ke tengah), dan jangan biarkan titik
+    // fokus terlalu mepet ke tepi gambar (crop di ujung sering terlihat
+    // janggal / memotong objek penting).
+    const s = CONFIG.smartCropStrength;
+    const m = CONFIG.smartCropMargin;
+    let xPct = 50 + (rawXPct - 50) * s;
+    let yPct = 50 + (rawYPct - 50) * s;
+    xPct = Math.min(100 - m, Math.max(m, xPct));
+    yPct = Math.min(100 - m, Math.max(m, yPct));
+
     const pos = xPct.toFixed(1) + '% ' + yPct.toFixed(1) + '%';
     focalCache[src] = pos;
     saveFocalCache();
