@@ -70,26 +70,38 @@ sudah diatur custom domain), lalu:
   di-scan dari jarak jauh (misal dari kursi tunggu di lobi)
 - **Atur posisi foto secara manual** (pengganti fitur auto-crop yang lama —
   auto-crop dihapus karena hasilnya kadang tidak akurat)
+- **Hapus foto** — buang foto tertentu dari slider tanpa perlu edit artikel
+  di WordPress, bisa dipulihkan lagi kapan saja
 
-## Cara pakai fitur "Atur posisi foto" (khusus admin)
+## Cara pakai fitur "Atur posisi foto" dan "Hapus foto" (khusus admin)
 
 1. **Tekan-tahan** tulisan "SMK Muhammadiyah Todanan" di kiri atas selama
    ±1 detik
 2. Masukkan PIN — default: `1234` (**ganti ini!** — cari `editPin: '1234'`
    di `index.html` dan ganti dengan PIN Anda sendiri sebelum deploy)
-3. Panel kecil muncul di kiri bawah → klik **"Atur posisi foto"**
+3. Panel kecil muncul di kiri bawah → klik **"Atur posisi / hapus foto"**
 4. **Geser foto** (drag pakai jari di HP/tablet, atau klik-tarik pakai mouse
-   di desktop) sampai komposisinya pas
-5. Klik **Simpan** — posisi ini otomatis dipisah untuk kategori "HP" atau
-   "Desktop/Tablet" tergantung perangkat yang sedang Anda pakai saat menyimpan
-   (lebar layar di bawah 768px dianggap HP)
+   di desktop) sampai komposisinya pas, lalu klik **Simpan** — posisi ini
+   otomatis dipisah untuk kategori "HP" atau "Desktop/Tablet" tergantung
+   perangkat yang sedang Anda pakai saat menyimpan (lebar layar di bawah
+   768px dianggap HP)
+5. Kalau foto itu memang tidak ingin ditampilkan sama sekali, klik
+   **🗑 Hapus foto ini** — akan ada konfirmasi dulu sebelum benar-benar dihapus
 6. Pakai tombol **◀ Sebelumnya / Berikutnya ▶** di toolbar untuk pindah ke
    foto lain tanpa keluar dari mode edit
 7. Klik **Selesai** untuk kembali ke slideshow normal
 
-Catatan: kalau KV belum diaktifkan (lihat langkah 3 di atas), posisi yang
-disimpan cuma berlaku di perangkat itu — untuk berlaku di semua perangkat,
-aktifkan KV dulu.
+Catatan: kalau KV belum diaktifkan (lihat bagian 3 di atas), posisi dan
+foto yang dihapus cuma berlaku di perangkat itu saja — untuk berlaku di
+semua perangkat, aktifkan KV dulu. Posisi foto dan foto yang dihapus
+memakai KV/binding yang SAMA (`POSITIONS`) — tidak perlu setup terpisah.
+
+## Cara memulihkan foto yang sudah dihapus
+
+Di panel admin (tekan-tahan logo + PIN), ada baris yang menunjukkan jumlah
+foto yang sedang disembunyikan/dihapus, dengan tombol **"Pulihkan semua foto
+tersembunyi"** — ini akan mengembalikan SEMUA foto yang pernah dihapus
+sekaligus (belum ada cara memulihkan satu-satu secara terpisah).
 
 ## Cara menyembunyikan QR code
 

@@ -234,8 +234,12 @@
     color:#fff;
   }
   .edit-btn:hover{ background:rgba(255,255,255,.2); }
+  .edit-btn:disabled{ opacity:.4; cursor:default; }
+  .edit-btn:disabled:hover{ background:rgba(255,255,255,.12); }
   .edit-btn.primary{ background:var(--biru-terang); }
   .edit-btn.primary:hover{ background:#1c5fce; }
+  .edit-btn.delete{ background:#C0392B; }
+  .edit-btn.delete:hover{ background:#a3301f; }
   .edit-btn.danger{ background:transparent; color:rgba(255,255,255,.6); }
 
   .edit-toggle-btn{
@@ -381,7 +385,9 @@
   <div class="admin-panel hidden" id="adminPanel">
     <div class="admin-status" id="kvStatusLine">Memeriksa status penyimpanan…</div>
     <label><input type="checkbox" id="qrVisibleToggle"> Tampilkan kode QR di layar ini</label>
-    <button class="edit-btn primary" id="openEditModeBtn">Atur posisi foto</button>
+    <button class="edit-btn primary" id="openEditModeBtn">Atur posisi / hapus foto</button>
+    <div class="admin-status" id="hiddenCountLine">Memeriksa foto tersembunyi…</div>
+    <button class="edit-btn" id="restoreHiddenBtn">Pulihkan semua foto tersembunyi</button>
     <button class="edit-btn danger" id="closeAdminPanelBtn">Tutup panel</button>
   </div>
 
@@ -391,6 +397,7 @@
       <button class="edit-btn" id="editPrevBtn">◀ Sebelumnya</button>
       <button class="edit-btn" id="editNextBtn">Berikutnya ▶</button>
       <button class="edit-btn" id="editResetBtn">Reset ke tengah</button>
+      <button class="edit-btn delete" id="editDeleteBtn">🗑 Hapus foto ini</button>
       <button class="edit-btn primary" id="editSaveBtn">Simpan</button>
       <button class="edit-btn danger" id="editDoneBtn">Selesai</button>
     </div>
@@ -405,6 +412,7 @@ const CONFIG = {
   // bukan langsung ke WordPress, supaya tidak kena blokir CORS browser.
   apiUrl: '/api/articles',
   positionApiUrl: '/api/position',  // penyimpanan posisi foto manual (perlu KV, lihat README)
+  hiddenApiUrl: '/api/hidden',      // penyimpanan foto yang dihapus/disembunyikan (KV yang sama)
   wpOrigin: 'https://smkmuhammadiyahtodanan.sch.id', // untuk melengkapi URL gambar yang ditulis relatif
   imageDurationMs: 6000,        // lama tampil tiap FOTO (bukan per artikel)
   maxImagesPerArticle: 5,       // batas jumlah foto yang diambil dari satu artikel
@@ -414,6 +422,7 @@ const CONFIG = {
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
   cacheKey: 'muhada-slider-articles-v4',
   positionCacheKey: 'muhada-slider-positions-v1',
+  hiddenCacheKey: 'muhada-slider-hidden-v1',
   qrVisibleKey: 'muhada-slider-qr-visible-v1'
 };
 
@@ -428,6 +437,10 @@ let adminUnlocked = false;
 // dimuat dari server (kalau KV sudah diatur) + fallback lokal per perangkat.
 let savedPositions = {};
 try{ savedPositions = JSON.parse(localStorage.getItem(CONFIG.positionCacheKey) || '{}'); }catch(e){ savedPositions = {}; }
+
+// Foto yang sudah "dihapus" lewat mode edit — dikecualikan dari slider.
+let hiddenImages = {};
+try{ hiddenImages = JSON.parse(localStorage.getItem(CONFIG.hiddenCacheKey) || '{}'); }catch(e){ hiddenImages = {}; }
 
 let qrVisible = true;
 try{ const v = localStorage.getItem(CONFIG.qrVisibleKey); if (v !== null) qrVisible = v === '1'; }catch(e){ /* pakai default */ }
@@ -465,8 +478,10 @@ const editDeviceLabel = document.getElementById('editDeviceLabel');
 const editPrevBtn = document.getElementById('editPrevBtn');
 const editNextBtn = document.getElementById('editNextBtn');
 const editResetBtn = document.getElementById('editResetBtn');
+const editDeleteBtn = document.getElementById('editDeleteBtn');
 const editSaveBtn = document.getElementById('editSaveBtn');
 const editDoneBtn = document.getElementById('editDoneBtn');
+const restoreHiddenBtn = document.getElementById('restoreHiddenBtn');
 
 function decodeHtml(html){
   const txt = document.createElement('textarea');
@@ -586,12 +601,13 @@ function buildQueue(articleList){
   const q = [];
   const usedImages = new Set();
   articleList.forEach(a => {
-    let imgs = a.images.filter(img => !usedImages.has(img));
-    if (imgs.length === 0 && a.images.length > 0) {
-      imgs = [a.images[0]]; // semua duplikat -> tetap tampilkan satu, jangan sampai kosong
+    const visible = a.images.filter(img => !hiddenImages[img]); // buang foto yang sudah "dihapus"
+    let imgs = visible.filter(img => !usedImages.has(img));
+    if (imgs.length === 0 && visible.length > 0) {
+      imgs = [visible[0]]; // semua duplikat -> tetap tampilkan satu, jangan sampai kosong
     }
     imgs.forEach(img => usedImages.add(img));
-    if (imgs.length === 0) imgs = [null]; // artikel memang tidak punya foto sama sekali
+    if (imgs.length === 0) imgs = [null]; // artikel memang tidak punya foto (valid) sama sekali
     imgs.forEach((image, i) => {
       q.push({
         id: a.id,
@@ -747,6 +763,67 @@ async function savePosition(imageUrl, position){
   }
 }
 
+/* ============ Hapus foto (sembunyikan permanen dari slider) ============ */
+async function loadHiddenImages(){
+  try{
+    const res = await fetch(CONFIG.hiddenApiUrl, { cache:'no-store' });
+    if (res.ok){
+      const body = await res.json();
+      const serverHidden = body.hidden || {};
+      hiddenImages = Object.assign({}, hiddenImages, serverHidden);
+      try{ localStorage.setItem(CONFIG.hiddenCacheKey, JSON.stringify(hiddenImages)); }catch(e){}
+      renderSlides(true);
+    }
+  }catch(e){ /* offline / KV belum diatur -> tetap pakai yang lokal */ }
+  updateHiddenCountLine();
+}
+
+async function setImageHidden(imageUrl, hidden){
+  if (hidden) hiddenImages[imageUrl] = true; else delete hiddenImages[imageUrl];
+  let localSaveOk = true;
+  try{ localStorage.setItem(CONFIG.hiddenCacheKey, JSON.stringify(hiddenImages)); }
+  catch(e){ localSaveOk = false; }
+
+  try{
+    const res = await fetch(CONFIG.hiddenApiUrl, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ imageUrl, hidden })
+    });
+    return res.ok
+      ? 'Foto dihapus — tidak akan tampil lagi di semua perangkat.'
+      : (localSaveOk
+          ? 'Dihapus di perangkat ini saja (server belum diatur — lihat README).'
+          : 'TIDAK TERSIMPAN — server belum diatur DAN penyimpanan lokal tidak tersedia.');
+  }catch(e){
+    return localSaveOk
+      ? 'Dihapus di perangkat ini saja (sedang offline).'
+      : 'TIDAK TERSIMPAN — sedang offline DAN penyimpanan lokal tidak tersedia.';
+  }
+}
+
+async function restoreAllHidden(){
+  hiddenImages = {};
+  try{ localStorage.setItem(CONFIG.hiddenCacheKey, '{}'); }catch(e){}
+  try{
+    await fetch(CONFIG.hiddenApiUrl, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ clearAll: true })
+    });
+  }catch(e){ /* tetap pulihkan yang lokal walau server gagal dihubungi */ }
+  updateHiddenCountLine();
+  renderSlides(true);
+}
+
+function updateHiddenCountLine(){
+  const el = document.getElementById('hiddenCountLine');
+  if (!el) return;
+  const count = Object.keys(hiddenImages).length;
+  el.textContent = count > 0 ? `${count} foto disembunyikan/dihapus` : 'Tidak ada foto yang disembunyikan';
+  document.getElementById('restoreHiddenBtn').disabled = count === 0;
+}
+
 /* ============ Render slide ============ */
 function renderSlides(preserveIndex){
   queue = buildQueue(articles);
@@ -875,10 +952,17 @@ function openAdminPanel(){
   }
   qrVisibleToggle.checked = qrVisible;
   updateKvStatusLine();
+  updateHiddenCountLine();
   adminPanel.classList.remove('hidden');
 }
 
 closeAdminPanelBtn.addEventListener('click', () => adminPanel.classList.add('hidden'));
+
+restoreHiddenBtn.addEventListener('click', async () => {
+  if (!confirm('Pulihkan semua foto yang pernah dihapus/disembunyikan?')) return;
+  await restoreAllHidden();
+  alert('Semua foto yang disembunyikan sudah dipulihkan.');
+});
 
 qrVisibleToggle.addEventListener('change', () => {
   qrVisible = qrVisibleToggle.checked;
@@ -990,6 +1074,22 @@ editSaveBtn.addEventListener('click', async () => {
   alert(msg);
 });
 
+editDeleteBtn.addEventListener('click', async () => {
+  const s = queue[currentIndex];
+  if (!s || !s.image) { alert('Slide ini tidak punya foto untuk dihapus.'); return; }
+  if (!confirm('Hapus foto ini dari slider? Foto tidak akan tampil lagi (bisa dipulihkan lewat panel admin).')) return;
+
+  detachDragHandlers();
+  editDeleteBtn.textContent = 'Menghapus…';
+  const msg = await setImageHidden(s.image, true);
+  editDeleteBtn.textContent = '🗑 Hapus foto ini';
+
+  renderSlides(true); // keluarkan foto ini dari antrean sekarang juga
+  attachDragHandlers();
+  editDeviceLabel.textContent = getDeviceCategory() === 'mobile' ? 'HP' : 'Desktop / Tablet';
+  alert(msg);
+});
+
 editDoneBtn.addEventListener('click', exitEditMode);
 
 /* ============ Navigasi manual (tap / swipe) ============ */
@@ -1014,6 +1114,7 @@ document.addEventListener('keydown', e => {
 showState('loading');
 loadData(false);
 loadSavedPositions();
+loadHiddenImages();
 setInterval(() => loadData(true), CONFIG.refreshDataEveryMs);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
