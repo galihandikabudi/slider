@@ -148,9 +148,8 @@
   /* ---------- QR code baca berita ---------- */
   .qr-box{
     position:absolute;
-    right:4vw;
-    top:50%;
-    transform:translateY(-50%);
+    right:6vw;
+    top:15vh;
     background:#fff;
     border-radius:16px;
     padding:10px;
@@ -175,7 +174,9 @@
     image-rendering:pixelated;
   }
   @media (max-width:640px){
-    .qr-box{ right:3.5vw; padding:8px; }
+    /* Di HP, jam/tanggal disembunyikan (lihat media query lain), jadi QR
+       kembali diletakkan di tengah tepi kanan seperti sebelumnya. */
+    .qr-box{ right:3.5vw; top:50%; transform:translateY(-50%); padding:8px; }
     .qr-box .qr-canvas-wrap{ width:84px; height:84px; }
   }
 
@@ -433,6 +434,21 @@ try{ const v = localStorage.getItem(CONFIG.qrVisibleKey); if (v !== null) qrVisi
 
 let kvActive = null; // null = belum dicek, true/false setelah loadSavedPositions() jalan
 
+// Sebagian browser kiosk/signage sengaja menonaktifkan atau membersihkan
+// localStorage tiap sesi — kalau itu terjadi DAN KV server belum aktif,
+// hasil edit tidak akan tersimpan di mana pun walau tidak ada error yang
+// terlihat. Deteksi ini di awal supaya bisa ditunjukkan jelas di panel admin.
+let localStorageAvailable = true;
+try{
+  const testKey = '__muhada_ls_test__';
+  localStorage.setItem(testKey, '1');
+  const ok = localStorage.getItem(testKey) === '1';
+  localStorage.removeItem(testKey);
+  localStorageAvailable = ok;
+}catch(e){
+  localStorageAvailable = false;
+}
+
 const slidesEl = document.getElementById('slides');
 const loadingScreen = document.getElementById('loadingScreen');
 const errorScreen = document.getElementById('errorScreen');
@@ -473,9 +489,15 @@ function proxyImage(url){
 // dengan path relatif, yang kalau dibiarkan akan gagal dimuat sama sekali.
 function resolveImageUrl(raw){
   if (!raw) return null;
+  raw = raw.trim();
+  if (!raw) return null;
   if (raw.startsWith('data:')) return null; // placeholder base64 dari lazy-load, bukan gambar asli
   try{
-    return new URL(raw, CONFIG.wpOrigin).href;
+    const url = new URL(raw, CONFIG.wpOrigin);
+    // Atribut kosong ("") akan resolve jadi domain polos tanpa path — itu
+    // bukan gambar sungguhan, bukan hasil yang valid untuk ditampilkan.
+    if (!url.pathname || url.pathname === '/') return null;
+    return url.href;
   }catch(e){
     return null;
   }
@@ -531,14 +553,21 @@ function extractArticle(post){
 /* Meratakan daftar artikel jadi satu entri per FOTO — mirip "Stories":
    selama masih di artikel yang sama, judul tetap sama, cuma fotonya berganti.
    Gambar yang sama (mis. dipakai ulang di beberapa artikel) hanya muncul
-   sekali — pada kemunculan pertamanya saja. */
+   sekali — TAPI kalau ternyata SEMUA foto satu artikel kebetulan duplikat
+   (mis. beberapa pengumuman memakai banner generik yang sama), artikel itu
+   tetap ditampilkan dengan foto pertamanya — supaya tidak jadi kosong/biru
+   begitu saja. Dedup hanya "menang" kalau artikel itu masih punya foto lain
+   yang belum dipakai. */
 function buildQueue(articleList){
   const q = [];
   const usedImages = new Set();
   articleList.forEach(a => {
     let imgs = a.images.filter(img => !usedImages.has(img));
+    if (imgs.length === 0 && a.images.length > 0) {
+      imgs = [a.images[0]]; // semua duplikat -> tetap tampilkan satu, jangan sampai kosong
+    }
     imgs.forEach(img => usedImages.add(img));
-    if (imgs.length === 0) imgs = [null]; // artikel tetap tampil walau semua fotonya duplikat
+    if (imgs.length === 0) imgs = [null]; // artikel memang tidak punya foto sama sekali
     imgs.forEach((image, i) => {
       q.push({
         id: a.id,
@@ -655,6 +684,9 @@ function updateKvStatusLine(){
   } else if (kvActive){
     el.innerHTML = 'Penyimpanan bersama: <b>Aktif</b> — posisi tersimpan untuk semua perangkat.';
     el.className = 'admin-status ok';
+  } else if (!localStorageAvailable){
+    el.innerHTML = 'Penyimpanan bersama: <b>Belum aktif</b>, dan penyimpanan lokal di perangkat/browser ini juga <b>tidak tersedia</b> — hasil edit TIDAK akan tersimpan sama sekali sampai KV diaktifkan (lihat README, bagian 3).';
+    el.className = 'admin-status warn';
   } else {
     el.innerHTML = 'Penyimpanan bersama: <b>Belum aktif</b> — posisi hanya tersimpan di perangkat ini (lihat README, bagian 3).';
     el.className = 'admin-status warn';
@@ -665,7 +697,10 @@ async function savePosition(imageUrl, position){
   const device = getDeviceCategory();
   if (!savedPositions[imageUrl]) savedPositions[imageUrl] = {};
   savedPositions[imageUrl][device] = position;
-  try{ localStorage.setItem(CONFIG.positionCacheKey, JSON.stringify(savedPositions)); }catch(e){}
+
+  let localSaveOk = true;
+  try{ localStorage.setItem(CONFIG.positionCacheKey, JSON.stringify(savedPositions)); }
+  catch(e){ localSaveOk = false; }
 
   try{
     const res = await fetch(CONFIG.positionApiUrl, {
@@ -673,11 +708,18 @@ async function savePosition(imageUrl, position){
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ imageUrl, device, position })
     });
-    return res.ok
-      ? 'Tersimpan — akan tampil di semua perangkat.'
-      : 'Tersimpan di perangkat ini saja (server belum diatur — lihat README).';
+    if (res.ok){
+      kvActive = true;
+      updateKvStatusLine();
+      return 'Tersimpan — akan tampil di semua perangkat.';
+    }
+    return localSaveOk
+      ? 'Tersimpan di perangkat ini saja (server belum diatur — lihat README).'
+      : 'TIDAK TERSIMPAN — server belum diatur (KV) DAN penyimpanan lokal di browser ini tidak tersedia. Aktifkan KV dulu (lihat README, bagian 3) supaya bisa tersimpan.';
   }catch(e){
-    return 'Tersimpan di perangkat ini saja (sedang offline).';
+    return localSaveOk
+      ? 'Tersimpan di perangkat ini saja (sedang offline).'
+      : 'TIDAK TERSIMPAN — sedang offline DAN penyimpanan lokal di browser ini tidak tersedia.';
   }
 }
 
@@ -693,6 +735,11 @@ function renderSlides(preserveIndex){
       slide.style.backgroundImage = `url("${s.image}")`;
       const pos = getPositionFor(s.image);
       if (pos) slide.style.backgroundPosition = pos;
+      // Diagnostik: kalau gambar gagal dimuat, catat di console (F12) —
+      // membantu membedakan "memang tidak ada fotonya" vs "gagal diambil".
+      const probe = new Image();
+      probe.onerror = () => console.warn('[slider] Gagal memuat gambar:', s.image, '— artikel:', s.title);
+      probe.src = s.image;
     }
     slide.innerHTML = `
       <div class="slide-content">
