@@ -100,7 +100,16 @@
     line-height:1.08;
     max-width:78ch;
     text-wrap:balance;
+    display:inline-block;
+    color:inherit;
+    text-decoration:none;
+    cursor:pointer;
+    position:relative;
+    z-index:6; /* di atas .navzone (z-index:5), supaya judul tetap bisa diklik
+                  walau posisinya kebetulan tumpang tindih dengan area tap navigasi */
   }
+  .title:hover,
+  .title:focus-visible{ text-decoration:underline; }
 
   /* ---------- Top bar: wordmark + jam ---------- */
   .topbar{
@@ -194,6 +203,7 @@
   /* ---------- Mode edit posisi foto (tersembunyi, khusus admin) ---------- */
   body.edit-mode .navzone{ pointer-events:none; }
   body.edit-mode .qr-box{ display:none; }
+  body.edit-mode .title{ pointer-events:none; } /* supaya drag tidak sengaja membuka link */
   body.edit-mode .topbar{ opacity:0; }
   body.edit-mode .slide.active{ cursor:grab; touch-action:none; }
   body.edit-mode .slide.active:active{ cursor:grabbing; }
@@ -877,7 +887,7 @@ function renderSlides(preserveIndex){
           <span class="meta-sep"></span>
           <span class="meta-source">Berita SMK Muhammadiyah Todanan</span>
         </div>
-        <div class="title">${s.title}</div>
+        <a class="title" href="${s.id ? getShortLink(s.id) : '#'}" target="_blank" rel="noopener noreferrer">${s.title}</a>
       </div>
       <div class="qr-box${qrVisible ? '' : ' hidden'}">
         <div class="qr-canvas-wrap"></div>
@@ -890,19 +900,22 @@ function renderSlides(preserveIndex){
   updateActiveSlide();
 }
 
+function getShortLink(postId){
+  // Link pendek buatan sendiri (/r/<id>) — dipakai untuk QR code maupun
+  // judul yang bisa diklik, mengarah ke artikel aslinya di website sekolah.
+  return `${window.location.origin}/r/${postId}`;
+}
+
 function renderQrCode(slideEl, postId){
   if (!postId || typeof QRCode === 'undefined') {
     const box = slideEl.querySelector('.qr-box');
     if (box) box.style.display = 'none';
     return;
   }
-  // Link pendek buatan sendiri (/r/<id>) supaya QR tidak padat & gampang
-  // di-scan dari jarak jauh — jauh lebih pendek daripada URL artikel asli.
-  const shortLink = `${window.location.origin}/r/${postId}`;
   const wrap = slideEl.querySelector('.qr-canvas-wrap');
   try{
     new QRCode(wrap, {
-      text: shortLink,
+      text: getShortLink(postId),
       width: 160,
       height: 160,
       colorDark: '#1B2E6E',
