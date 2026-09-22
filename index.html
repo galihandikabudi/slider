@@ -148,22 +148,22 @@
   /* ---------- QR code baca berita ---------- */
   .qr-box{
     position:absolute;
-    right:6vw;
-    bottom:8vh;
+    right:4vw;
+    top:50%;
+    transform:translateY(-50%);
     background:#fff;
     border-radius:16px;
-    padding:12px 12px 9px;
+    padding:10px;
     display:flex;
-    flex-direction:column;
     align-items:center;
-    gap:6px;
+    justify-content:center;
     box-shadow:0 12px 30px rgba(0,0,0,.4);
     z-index:3;
   }
   .qr-box.hidden{ display:none; }
   .qr-box .qr-canvas-wrap{
-    width:clamp(110px,11vw,180px);
-    height:clamp(110px,11vw,180px);
+    width:clamp(100px,10vw,160px);
+    height:clamp(100px,10vw,160px);
     display:flex;
     align-items:center;
     justify-content:center;
@@ -174,18 +174,20 @@
     height:100% !important;
     image-rendering:pixelated;
   }
-  .qr-box .qr-label{
-    font-family:'Inter',sans-serif;
-    font-size:11.5px;
-    font-weight:600;
-    color:var(--biru-tua);
-    text-align:center;
-    max-width:110px;
-    line-height:1.25;
-  }
   @media (max-width:640px){
-    .qr-box{ right:5vw; bottom:auto; top:14vh; padding:9px 9px 7px; }
-    .qr-box .qr-canvas-wrap{ width:88px; height:88px; }
+    .qr-box{ right:3.5vw; padding:8px; }
+    .qr-box .qr-canvas-wrap{ width:84px; height:84px; }
+  }
+
+  /* ---------- Tampilan HP: fokus ke gambar, teks diperkecil, jam/tanggal disembunyikan ---------- */
+  @media (max-width:768px){
+    .clock{ display:none; }
+    .wordmark{ font-size:13px; }
+    .slide-content{ padding:3.5vh 5.5vw 5.5vh; }
+    .title{ font-size:clamp(17px,5.2vw,24px); line-height:1.18; max-width:none; }
+    .meta-row{ margin-bottom:0.9vh; gap:10px; }
+    .meta-date{ font-size:11px; }
+    .meta-source{ font-size:10px; }
   }
 
   /* ---------- Mode edit posisi foto (tersembunyi, khusus admin) ---------- */
@@ -271,6 +273,15 @@
     min-width:220px;
   }
   .admin-panel.hidden{ display:none; }
+  .admin-panel .admin-status{
+    font-size:12px;
+    color:rgba(255,255,255,.7);
+    padding-bottom:4px;
+    border-bottom:1px solid rgba(255,255,255,.12);
+  }
+  .admin-panel .admin-status b{ color:#fff; }
+  .admin-panel .admin-status.ok b{ color:#5FD37B; }
+  .admin-panel .admin-status.warn b{ color:var(--oranye); }
   .admin-panel label{
     display:flex;
     align-items:center;
@@ -367,6 +378,7 @@
   <button class="edit-toggle-btn" id="editToggleBtn" title="Atur posisi foto">✎</button>
 
   <div class="admin-panel hidden" id="adminPanel">
+    <div class="admin-status" id="kvStatusLine">Memeriksa status penyimpanan…</div>
     <label><input type="checkbox" id="qrVisibleToggle"> Tampilkan kode QR di layar ini</label>
     <button class="edit-btn primary" id="openEditModeBtn">Atur posisi foto</button>
     <button class="edit-btn danger" id="closeAdminPanelBtn">Tutup panel</button>
@@ -419,6 +431,8 @@ try{ savedPositions = JSON.parse(localStorage.getItem(CONFIG.positionCacheKey) |
 let qrVisible = true;
 try{ const v = localStorage.getItem(CONFIG.qrVisibleKey); if (v !== null) qrVisible = v === '1'; }catch(e){ /* pakai default */ }
 
+let kvActive = null; // null = belum dicek, true/false setelah loadSavedPositions() jalan
+
 const slidesEl = document.getElementById('slides');
 const loadingScreen = document.getElementById('loadingScreen');
 const errorScreen = document.getElementById('errorScreen');
@@ -467,33 +481,18 @@ function resolveImageUrl(raw){
   }
 }
 
-// Pilih versi gambar dengan resolusi PALING TINGGI yang tersedia di WordPress
-// (bandingkan semua ukuran terdaftar + file aslinya), supaya detailnya
-// maksimal saat ditampilkan fullscreen di TV/layar besar.
-function pickHighestResUrl(media){
-  let bestUrl = media.source_url;
-  let bestWidth = (media.media_details && media.media_details.width) || 0;
-  const sizes = media.media_details && media.media_details.sizes;
-  if (sizes){
-    Object.keys(sizes).forEach(key => {
-      const s = sizes[key];
-      if (s && s.source_url && s.width && s.width > bestWidth){
-        bestWidth = s.width;
-        bestUrl = s.source_url;
-      }
-    });
-  }
-  return bestUrl;
-}
-
 function extractImages(post){
   const images = [];
 
-  // 1. Foto unggulan (featured image) artikel — diutamakan tampil duluan,
-  //    resolusi setinggi mungkin.
+  // 1. Foto unggulan (featured image) artikel — diutamakan tampil duluan.
+  //    Pakai ukuran "large" bawaan WordPress (paling stabil), fallback ke
+  //    file asli kalau ukuran itu tidak tersedia.
   const media = post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0];
   if (media) {
-    const resolved = resolveImageUrl(pickHighestResUrl(media));
+    const rawSrc = (media.media_details && media.media_details.sizes && media.media_details.sizes.large)
+      ? media.media_details.sizes.large.source_url
+      : media.source_url;
+    const resolved = resolveImageUrl(rawSrc);
     if (resolved) images.push(proxyImage(resolved));
   }
 
@@ -504,20 +503,11 @@ function extractImages(post){
     doc.querySelectorAll('img').forEach(img => {
       // Banyak tema/plugin lazy-load menyimpan URL asli di salah satu atribut
       // data-* ini, dan menyisakan placeholder kosong/buram di "src".
-      let raw =
+      const raw =
         img.getAttribute('data-lazy-src') ||
         img.getAttribute('data-src') ||
         img.getAttribute('data-original') ||
         img.getAttribute('src');
-
-      const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset') || img.getAttribute('data-lazy-srcset');
-      if (srcset){
-        const candidates = srcset.split(',').map(c => c.trim().split(/\s+/)).filter(c => c[0]);
-        if (candidates.length){
-          candidates.sort((a,b) => (parseInt(b[1])||0) - (parseInt(a[1])||0));
-          raw = candidates[0][0];
-        }
-      }
 
       const resolved = resolveImageUrl(raw);
       const src = proxyImage(resolved);
@@ -641,12 +631,34 @@ async function loadSavedPositions(){
   try{
     const res = await fetch(CONFIG.positionApiUrl, { cache:'no-store' });
     if (res.ok){
-      const serverData = await res.json();
+      const body = await res.json();
+      kvActive = !!body.kvActive;
+      const serverData = body.data || {};
       savedPositions = Object.assign({}, savedPositions, serverData);
       try{ localStorage.setItem(CONFIG.positionCacheKey, JSON.stringify(savedPositions)); }catch(e){}
       renderSlides(true); // terapkan ulang kalau slide sudah sempat dirender duluan
+    } else {
+      kvActive = false;
     }
-  }catch(e){ /* offline / KV belum diatur -> tetap pakai yang lokal */ }
+  }catch(e){
+    kvActive = false; // offline -> tetap pakai yang lokal
+  }
+  updateKvStatusLine();
+}
+
+function updateKvStatusLine(){
+  const el = document.getElementById('kvStatusLine');
+  if (!el) return;
+  if (kvActive === null){
+    el.textContent = 'Memeriksa status penyimpanan…';
+    el.className = 'admin-status';
+  } else if (kvActive){
+    el.innerHTML = 'Penyimpanan bersama: <b>Aktif</b> — posisi tersimpan untuk semua perangkat.';
+    el.className = 'admin-status ok';
+  } else {
+    el.innerHTML = 'Penyimpanan bersama: <b>Belum aktif</b> — posisi hanya tersimpan di perangkat ini (lihat README, bagian 3).';
+    el.className = 'admin-status warn';
+  }
 }
 
 async function savePosition(imageUrl, position){
@@ -693,7 +705,6 @@ function renderSlides(preserveIndex){
       </div>
       <div class="qr-box${qrVisible ? '' : ' hidden'}">
         <div class="qr-canvas-wrap"></div>
-        <div class="qr-label">Scan untuk baca berita lengkap</div>
       </div>`;
     slidesEl.appendChild(slide);
     renderQrCode(slide, s.id);
@@ -797,6 +808,7 @@ function openAdminPanel(){
     editToggleBtn.classList.add('visible');
   }
   qrVisibleToggle.checked = qrVisible;
+  updateKvStatusLine();
   adminPanel.classList.remove('hidden');
 }
 

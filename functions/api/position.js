@@ -13,12 +13,14 @@ const KV_KEY = 'positions';
 export async function onRequestGet(context) {
   const kv = context.env.POSITIONS;
   if (!kv) {
-    return new Response('{}', {
+    return new Response(JSON.stringify({ kvActive: false, data: {} }), {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
     });
   }
   const raw = await kv.get(KV_KEY);
-  return new Response(raw || '{}', {
+  let data = {};
+  try{ data = raw ? JSON.parse(raw) : {}; }catch(e){ data = {}; }
+  return new Response(JSON.stringify({ kvActive: true, data }), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
 }
