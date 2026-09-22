@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Berita SMK Muhammadiyah Todanan</title>
+<meta name="theme-color" content="#1B2E6E">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Berita Muhada">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --biru-tua:#1B2E6E;
+    --biru-terang:#1A6FE8;
+    --oranye:#F28C00;
+    --ink:#0E1730;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    height:100%;
+    background:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    overflow:hidden;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+
+  #app{
+    position:fixed;
+    inset:0;
+    width:100%;
+    height:100%;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+
+  /* ---------- Slides ---------- */
+  .slide{
+    position:absolute;
+    inset:0;
+    opacity:0;
+    transition:opacity 900ms ease;
+    background-size:cover;
+    background-position:center;
+    background-color:var(--biru-tua);
+  }
+  .slide.active{ opacity:1; z-index:2; }
+
+  .slide::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:
+      linear-gradient(to top, rgba(14,23,48,.94) 0%, rgba(14,23,48,.75) 22%, rgba(27,46,110,.15) 52%, rgba(14,23,48,.35) 100%);
+  }
+
+  .slide-content{
+    position:absolute;
+    left:0; right:0; bottom:0;
+    padding:6vh 6vw 8vh;
+    color:#fff;
+    transform:translateY(24px);
+    opacity:0;
+    transition:transform 700ms ease 200ms, opacity 700ms ease 200ms;
+  }
+  .slide.active .slide-content{ transform:translateY(0); opacity:1; }
+
+  .meta-row{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    margin-bottom:1.4vh;
+  }
+  .meta-date{
+    font-size:clamp(13px,1.3vw,17px);
+    font-weight:600;
+    color:var(--oranye);
+    letter-spacing:.02em;
+  }
+  .meta-sep{
+    width:5px; height:5px; border-radius:50%;
+    background:rgba(255,255,255,.5);
+  }
+  .meta-source{
+    font-size:clamp(12px,1.1vw,15px);
+    color:rgba(255,255,255,.72);
+  }
+
+  .title{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:clamp(28px,4.6vw,64px);
+    line-height:1.08;
+    max-width:78ch;
+    text-wrap:balance;
+  }
+
+  /* ---------- Top bar: wordmark + progress ---------- */
+  .topbar{
+    position:absolute;
+    top:0; left:0; right:0;
+    z-index:10;
+    padding:4.5vh 6vw 0;
+  }
+  .wordmark{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    color:#fff;
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:clamp(14px,1.4vw,19px);
+    text-shadow:0 2px 12px rgba(0,0,0,.45);
+    margin-bottom:2.4vh;
+  }
+  .wordmark .dot{
+    width:9px; height:9px; border-radius:50%;
+    background:var(--oranye);
+  }
+
+  .progress-track{
+    display:flex;
+    gap:6px;
+  }
+  .progress-seg{
+    flex:1;
+    height:3px;
+    background:rgba(255,255,255,.28);
+    border-radius:3px;
+    overflow:hidden;
+  }
+  .progress-seg .fill{
+    height:100%;
+    width:0%;
+    background:var(--biru-terang);
+    border-radius:3px;
+  }
+  .progress-seg.done .fill{ width:100%; background:var(--oranye); }
+  .progress-seg.filling .fill{ transition:width linear; }
+
+  /* ---------- Tap zones for manual nav ---------- */
+  .navzone{
+    position:absolute;
+    top:0; bottom:0;
+    width:20%;
+    z-index:5;
+  }
+  .navzone.prev{ left:0; }
+  .navzone.next{ right:0; }
+
+  /* ---------- States ---------- */
+  .state-screen{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    gap:18px;
+    background:linear-gradient(160deg,var(--biru-tua),var(--ink));
+    color:#fff;
+    text-align:center;
+    padding:0 8vw;
+    z-index:20;
+  }
+  .state-screen.hidden{ display:none; }
+  .state-screen .mark{
+    width:56px; height:56px; border-radius:16px;
+    background:var(--oranye);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:700; font-size:26px; color:var(--biru-tua);
+  }
+  .state-screen h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;
+    font-size:clamp(20px,2.6vw,30px);
+  }
+  .state-screen p{
+    color:rgba(255,255,255,.65);
+    font-size:clamp(13px,1.3vw,16px);
+    max-width:52ch;
+  }
+  .spinner{
+    width:26px; height:26px;
+    border:3px solid rgba(255,255,255,.25);
+    border-top-color:var(--biru-terang);
+    border-radius:50%;
+    animation:spin 900ms linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <div class="topbar">
+    <div class="wordmark"><span class="dot"></span>SMK Muhammadiyah Todanan</div>
+    <div class="progress-track" id="progressTrack"></div>
+  </div>
+
+  <div id="slides"></div>
+
+  <div class="navzone prev" id="zonePrev"></div>
+  <div class="navzone next" id="zoneNext"></div>
+
+  <div class="state-screen" id="loadingScreen">
+    <div class="spinner"></div>
+    <h1>Memuat berita terbaru&hellip;</h1>
+  </div>
+
+  <div class="state-screen hidden" id="errorScreen">
+    <div class="mark">M</div>
+    <h1>Belum bisa memuat berita</h1>
+    <p id="errorDetail">Periksa koneksi internet, atau pastikan REST API WordPress aktif di website sekolah.</p>
+  </div>
+
+  <div class="state-screen hidden" id="emptyScreen">
+    <div class="mark">M</div>
+    <h1>Belum ada artikel</h1>
+    <p>Slider akan otomatis menampilkan berita begitu ada artikel baru di website sekolah.</p>
+  </div>
+
+</div>
+
+<script>
+/* ============ Konfigurasi ============ */
+const CONFIG = {
+  // Diambil lewat Cloudflare Pages Function (functions/api/articles.js),
+  // bukan langsung ke WordPress, supaya tidak kena blokir CORS browser.
+  apiUrl: '/api/articles',
+  slideDurationMs: 8000,       // lama tampil per slide
+  refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
+  cacheKey: 'muhada-slider-articles-v1'
+};
+
+let articles = [];
+let currentIndex = 0;
+let slideTimer = null;
+let progressStart = 0;
+
+const slidesEl = document.getElementById('slides');
+const progressTrackEl = document.getElementById('progressTrack');
+const loadingScreen = document.getElementById('loadingScreen');
+const errorScreen = document.getElementById('errorScreen');
+const emptyScreen = document.getElementById('emptyScreen');
+
+function decodeHtml(html){
+  const txt = document.createElement('textarea');
+  txt.innerHTML = html;
+  return txt.value;
+}
+
+function formatDate(iso){
+  try{
+    return new Date(iso).toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' });
+  }catch(e){ return ''; }
+}
+
+function extractArticle(post){
+  let image = null;
+  const media = post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0];
+  if (media) {
+    image = (media.media_details && media.media_details.sizes && media.media_details.sizes.large)
+      ? media.media_details.sizes.large.source_url
+      : media.source_url;
+  }
+  return {
+    title: decodeHtml(post.title ? post.title.rendered : ''),
+    date: post.date,
+    link: post.link,
+    image
+  };
+}
+
+/* ============ Ambil data dari WordPress ============ */
+async function fetchArticles(){
+  const res = await fetch(CONFIG.apiUrl, { cache:'no-store' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const posts = await res.json();
+  if (!Array.isArray(posts)) throw new Error('Format respons tidak sesuai');
+  return posts.map(extractArticle).filter(a => a.title);
+}
+
+async function loadData(isBackgroundRefresh){
+  try{
+    const fresh = await fetchArticles();
+    if (fresh.length === 0){
+      if (!isBackgroundRefresh) showState('empty');
+      return;
+    }
+    articles = fresh;
+    localStorage.setItem(CONFIG.cacheKey, JSON.stringify({ savedAt:Date.now(), articles }));
+    if (!isBackgroundRefresh) {
+      renderSlides();
+      showState('ready');
+      startSlideshow();
+    } else {
+      renderSlides(true);
+    }
+  }catch(err){
+    console.error('Gagal mengambil data:', err);
+    if (!isBackgroundRefresh){
+      const cached = loadCache();
+      if (cached && cached.length){
+        articles = cached;
+        renderSlides();
+        showState('ready');
+        startSlideshow();
+      } else {
+        document.getElementById('errorDetail').textContent =
+          'Tidak bisa terhubung ke ' + CONFIG.apiUrl + ' — ' + err.message;
+        showState('error');
+      }
+    }
+  }
+}
+
+function loadCache(){
+  try{
+    const raw = localStorage.getItem(CONFIG.cacheKey);
+    if (!raw) return null;
+    return JSON.parse(raw).articles || null;
+  }catch(e){ return null; }
+}
+
+function showState(state){
+  loadingScreen.classList.toggle('hidden', state !== 'loading');
+  errorScreen.classList.toggle('hidden', state !== 'error');
+  emptyScreen.classList.toggle('hidden', state !== 'empty');
+}
+
+/* ============ Render slide ============ */
+function renderSlides(preserveIndex){
+  slidesEl.innerHTML = '';
+  progressTrackEl.innerHTML = '';
+
+  articles.forEach((a) => {
+    const slide = document.createElement('div');
+    slide.className = 'slide';
+    if (a.image) slide.style.backgroundImage = `url("${a.image}")`;
+    slide.innerHTML = `
+      <div class="slide-content">
+        <div class="meta-row">
+          <span class="meta-date">${formatDate(a.date)}</span>
+          <span class="meta-sep"></span>
+          <span class="meta-source">Berita SMK Muhammadiyah Todanan</span>
+        </div>
+        <div class="title">${a.title}</div>
+      </div>`;
+    slidesEl.appendChild(slide);
+
+    const seg = document.createElement('div');
+    seg.className = 'progress-seg';
+    seg.innerHTML = '<div class="fill"></div>';
+    progressTrackEl.appendChild(seg);
+  });
+
+  if (!preserveIndex || currentIndex >= articles.length) currentIndex = 0;
+  updateActiveSlide();
+}
+
+function updateActiveSlide(){
+  document.querySelectorAll('.slide').forEach((el,i)=>{
+    el.classList.toggle('active', i === currentIndex);
+  });
+  document.querySelectorAll('.progress-seg').forEach((seg,i)=>{
+    seg.classList.remove('filling');
+    seg.classList.toggle('done', i < currentIndex);
+    const fill = seg.querySelector('.fill');
+    if (i < currentIndex){ fill.style.transition='none'; fill.style.width='100%'; }
+    else if (i === currentIndex){ /* handled in startProgress */ }
+    else { fill.style.transition='none'; fill.style.width='0%'; }
+  });
+}
+
+function startProgress(){
+  const seg = document.querySelectorAll('.progress-seg')[currentIndex];
+  if (!seg) return;
+  const fill = seg.querySelector('.fill');
+  seg.classList.add('filling');
+  fill.style.transition = 'none';
+  fill.style.width = '0%';
+  // force reflow so the transition below actually animates
+  void fill.offsetWidth;
+  fill.style.transition = `width ${CONFIG.slideDurationMs}ms linear`;
+  fill.style.width = '100%';
+}
+
+function goTo(index){
+  if (articles.length === 0) return;
+  currentIndex = (index + articles.length) % articles.length;
+  updateActiveSlide();
+  startProgress();
+  resetTimer();
+}
+
+function nextSlide(){ goTo(currentIndex + 1); }
+function prevSlide(){ goTo(currentIndex - 1); }
+
+function resetTimer(){
+  clearTimeout(slideTimer);
+  slideTimer = setTimeout(nextSlide, CONFIG.slideDurationMs);
+}
+
+function startSlideshow(){
+  clearTimeout(slideTimer);
+  currentIndex = 0;
+  updateActiveSlide();
+  startProgress();
+  resetTimer();
+}
+
+/* ============ Navigasi manual (tap / swipe) ============ */
+document.getElementById('zonePrev').addEventListener('click', prevSlide);
+document.getElementById('zoneNext').addEventListener('click', nextSlide);
+
+let touchStartX = null;
+document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, {passive:true});
+document.addEventListener('touchend', e => {
+  if (touchStartX === null) return;
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  if (Math.abs(dx) > 50) { dx > 0 ? prevSlide() : nextSlide(); }
+  touchStartX = null;
+}, {passive:true});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') nextSlide();
+  if (e.key === 'ArrowLeft') prevSlide();
+});
+
+/* ============ Boot ============ */
+showState('loading');
+loadData(false);
+setInterval(() => loadData(true), CONFIG.refreshDataEveryMs);
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('service-worker.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
