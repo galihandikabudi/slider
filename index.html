@@ -305,6 +305,25 @@
     font-size:13px;
   }
   .admin-panel .edit-btn{ width:100%; text-align:center; }
+  .admin-panel .setting-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    color:#fff;
+    font-size:13px;
+  }
+  .admin-panel select{
+    font-family:'Inter',sans-serif;
+    font-size:13px;
+    font-weight:600;
+    padding:6px 8px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,.25);
+    background:rgba(255,255,255,.12);
+    color:#fff;
+  }
+  .admin-panel select option{ color:#0E1730; background:#fff; }
 
   /* ---------- Tap zones for manual nav ---------- */
   .navzone{
@@ -395,6 +414,10 @@
   <div class="admin-panel hidden" id="adminPanel">
     <div class="admin-status" id="kvStatusLine">Memeriksa status penyimpanan…</div>
     <label><input type="checkbox" id="qrVisibleToggle"> Tampilkan kode QR di layar ini</label>
+    <div class="setting-row">
+      <span>Jumlah berita ditampilkan</span>
+      <select id="articleCountSelect"></select>
+    </div>
     <button class="edit-btn primary" id="openEditModeBtn">Atur posisi / hapus foto</button>
     <div class="admin-status" id="hiddenCountLine">Memeriksa foto tersembunyi…</div>
     <button class="edit-btn" id="restoreHiddenBtn">Pulihkan semua foto tersembunyi</button>
@@ -426,14 +449,18 @@ const CONFIG = {
   wpOrigin: 'https://smkmuhammadiyahtodanan.sch.id', // untuk melengkapi URL gambar yang ditulis relatif
   imageDurationMs: 6000,        // lama tampil tiap FOTO (bukan per artikel)
   maxImagesPerArticle: 5,       // batas jumlah foto yang diambil dari satu artikel
-  maxImageWidth: 1920,          // batas lebar gambar (px) — cukup tajam (setara Full HD), tanpa boros data
+  targetImageWidth: 1920,       // gambar dipilih minimal selebar ini (Full HD) bila tersedia
+  maxImageWidth: 4200,          // batas atas — cukup untuk foto HP (±4000px), tapi menghindari file DSLR mentah belasan MB
   mobileBreakpoint: 768,        // di bawah lebar ini (px) dianggap "HP", di atasnya "Desktop/Tablet"
   editPin: '1234',              // GANTI ini dengan PIN Anda sendiri sebelum deploy
   refreshDataEveryMs: 15 * 60 * 1000, // ambil ulang data tiap 15 menit
-  cacheKey: 'muhada-slider-articles-v4',
+  articleCountOptions: [5, 10, 15, 20, 30], // pilihan di panel pengaturan
+  defaultArticleCount: 20,      // jumlah berita bawaan kalau belum pernah diatur
+  cacheKey: 'muhada-slider-articles-v5',
   positionCacheKey: 'muhada-slider-positions-v1',
   hiddenCacheKey: 'muhada-slider-hidden-v1',
-  qrVisibleKey: 'muhada-slider-qr-visible-v1'
+  qrVisibleKey: 'muhada-slider-qr-visible-v1',
+  articleCountKey: 'muhada-slider-article-count-v1'
 };
 
 let articles = [];   // data mentah per artikel (judul, tanggal, daftar gambar)
@@ -459,6 +486,13 @@ try{ hiddenImages = JSON.parse(localStorage.getItem(CONFIG.hiddenCacheKey) || '{
 
 let qrVisible = true;
 try{ const v = localStorage.getItem(CONFIG.qrVisibleKey); if (v !== null) qrVisible = v === '1'; }catch(e){ /* pakai default */ }
+
+// Jumlah berita yang ditampilkan — pengaturan per perangkat (seperti opsi QR).
+let articleCount = CONFIG.defaultArticleCount;
+try{
+  const v = parseInt(localStorage.getItem(CONFIG.articleCountKey), 10);
+  if (CONFIG.articleCountOptions.includes(v)) articleCount = v;
+}catch(e){ /* pakai default */ }
 
 let kvActive = null; // null = belum dicek, true/false setelah loadSavedPositions() jalan
 
@@ -486,6 +520,7 @@ const clockDateEl = document.getElementById('clockDate');
 const editToggleBtn = document.getElementById('editToggleBtn');
 const adminPanel = document.getElementById('adminPanel');
 const qrVisibleToggle = document.getElementById('qrVisibleToggle');
+const articleCountSelect = document.getElementById('articleCountSelect');
 const openEditModeBtn = document.getElementById('openEditModeBtn');
 const closeAdminPanelBtn = document.getElementById('closeAdminPanelBtn');
 const editToolbar = document.getElementById('editToolbar');
@@ -529,65 +564,99 @@ function resolveImageUrl(raw){
   }
 }
 
+// Kunci "foto yang sama": buang ukuran tambahan di nama file ("-1024x768"),
+// "-scaled", dan query, supaya versi kecil & versi besar dari foto yang sama
+// dikenali sebagai SATU foto (bukan dua slide dengan kualitas berbeda).
+function fileKey(url){
+  try{
+    const u = new URL(url, CONFIG.wpOrigin);
+    return (u.hostname + u.pathname)
+      .toLowerCase()
+      .replace(/-scaled(?=\.[a-z0-9]+$)/, '')
+      .replace(/-\d+x\d+(?=\.[a-z0-9]+$)/, '');
+  }catch(e){ return String(url); }
+}
+
+// Lebar gambar yang tertulis di nama file WordPress, mis. "foto-1536x1024.jpg" -> 1536.
+function widthFromFilename(url){
+  const m = String(url).match(/-(\d+)x\d+\.[a-z0-9]+(?:[?#].*)?$/i);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+// SATU aturan pemilihan resolusi untuk SEMUA foto (foto unggulan maupun foto
+// di isi artikel), supaya kualitasnya seragam:
+//   1. ambil ukuran TERKECIL yang masih >= targetImageWidth (Full HD) dan
+//      <= maxImageWidth  -> tajam di layar penuh, tanpa file berlebihan
+//   2. kalau tidak ada, ambil yang TERBESAR di bawah target
+//   3. kalau semuanya melebihi batas atas, ambil yang paling kecil di antaranya
+function pickBestCandidate(cands){
+  const list = cands.filter(c => c && c.url);
+  if (!list.length) return null;
+  const known = list.filter(c => c.width > 0);
+  if (!known.length) return list[0].url; // lebar tidak diketahui -> pakai apa adanya
+  const T = CONFIG.targetImageWidth, M = CONFIG.maxImageWidth;
+  const inRange = known.filter(c => c.width >= T && c.width <= M).sort((a, b) => a.width - b.width);
+  if (inRange.length) return inRange[0].url;
+  const below = known.filter(c => c.width < T).sort((a, b) => b.width - a.width);
+  if (below.length) return below[0].url;
+  return known.filter(c => c.width > M).sort((a, b) => a.width - b.width)[0].url;
+}
+
+function candidatesFromSrcset(srcset, src){
+  const out = [];
+  if (srcset){
+    srcset.split(',').forEach(part => {
+      const bits = part.trim().split(/\s+/);
+      if (!bits[0]) return;
+      const w = /w$/.test(bits[1] || '') ? parseInt(bits[1], 10) : 0;
+      out.push({ url: bits[0], width: w || widthFromFilename(bits[0]) });
+    });
+  }
+  if (src) out.push({ url: src, width: widthFromFilename(src) });
+  return out;
+}
+
 function extractImages(post){
   const images = [];
+  const seen = new Set();
 
-  // Pilih file ukuran TERBESAR yang tersedia TAPI tidak melebihi
-  // CONFIG.maxImageWidth — cukup tajam untuk fullscreen di TV/monitor mana
-  // pun, tanpa mengunduh file mentah/original yang bisa berukuran belasan MB.
-  function pickBestFromSizes(sizesObj, fallbackUrl){
-    let best = null, bestWidth = 0;
-    if (sizesObj){
-      Object.keys(sizesObj).forEach(key => {
-        const s = sizesObj[key];
-        if (s && s.source_url && s.width && s.width <= CONFIG.maxImageWidth && s.width > bestWidth){
-          bestWidth = s.width;
-          best = s.source_url;
-        }
-      });
-    }
-    if (best) return best;
-    // Tidak ada size yang pas di bawah batas -> pakai "large" bawaan WordPress
-    // kalau ada, atau file asli sebagai upaya terakhir.
-    if (sizesObj && sizesObj.large && sizesObj.large.source_url) return sizesObj.large.source_url;
-    return fallbackUrl;
+  // Tambahkan foto hanya kalau FOTO YANG SAMA (meski beda ukuran) belum ada.
+  function addImage(rawUrl){
+    const resolved = resolveImageUrl(rawUrl);
+    if (!resolved) return;
+    const key = fileKey(resolved);
+    if (seen.has(key)) return;
+    seen.add(key);
+    images.push(resolved);
   }
 
-  function pickBestFromSrcset(srcset, fallbackSrc){
-    if (!srcset) return fallbackSrc;
-    const candidates = srcset.split(',')
-      .map(c => c.trim().split(/\s+/))
-      .filter(c => c[0])
-      .map(c => ({ url: c[0], width: parseInt(c[1]) || 0 }));
-    if (!candidates.length) return fallbackSrc;
-    const underCap = candidates.filter(c => c.width > 0 && c.width <= CONFIG.maxImageWidth);
-    if (underCap.length){
-      underCap.sort((a, b) => b.width - a.width);
-      return underCap[0].url;
-    }
-    // Semua kandidat di srcset melebihi batas -> pilih yang paling kecil
-    // di antaranya (paling mendekati batas), daripada yang paling besar.
-    const withWidth = candidates.filter(c => c.width > 0).sort((a, b) => a.width - b.width);
-    return withWidth.length ? withWidth[0].url : fallbackSrc;
-  }
-
-  // 1. Foto unggulan (featured image) artikel — diutamakan tampil duluan.
+  // 1. Foto unggulan (featured image) — kandidatnya SEMUA ukuran yang
+  //    terdaftar di WordPress ditambah file aslinya.
   const media = post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0];
   if (media) {
-    const rawSrc = pickBestFromSizes(media.media_details && media.media_details.sizes, media.source_url);
-    const resolved = resolveImageUrl(rawSrc);
-    if (resolved) images.push(resolved);
+    const cands = [];
+    const sizes = media.media_details && media.media_details.sizes;
+    if (sizes){
+      Object.keys(sizes).forEach(k => {
+        const s = sizes[k];
+        if (s && s.source_url) cands.push({ url: s.source_url, width: s.width || widthFromFilename(s.source_url) });
+      });
+    }
+    if (media.source_url){
+      cands.push({ url: media.source_url, width: (media.media_details && media.media_details.width) || 0 });
+    }
+    const best = pickBestCandidate(cands);
+    console.debug('[slider] foto unggulan dipilih:', best);
+    addImage(best);
   }
 
-  // 2. Semua gambar lain yang ada di isi/body artikel.
+  // 2. Semua gambar lain di isi artikel — aturan pemilihan yang sama.
   try{
     const html = (post.content && post.content.rendered) || '';
     const doc = new DOMParser().parseFromString(html, 'text/html');
     doc.querySelectorAll('img').forEach(img => {
-      const rawSrc = img.getAttribute('src');
-      const chosen = pickBestFromSrcset(img.getAttribute('srcset'), rawSrc);
-      const resolved = resolveImageUrl(chosen);
-      if (resolved && !images.includes(resolved)) images.push(resolved);
+      const best = pickBestCandidate(candidatesFromSrcset(img.getAttribute('srcset'), img.getAttribute('src')));
+      addImage(best);
     });
   }catch(e){ /* abaikan kalau parsing gagal */ }
 
@@ -615,13 +684,18 @@ function extractArticle(post){
 function buildQueue(articleList){
   const q = [];
   const usedImages = new Set();
-  articleList.forEach(a => {
+  // Hanya N artikel terbaru sesuai pengaturan jumlah berita (juga berlaku
+  // untuk data cadangan offline yang mungkin menyimpan lebih banyak).
+  articleList.slice(0, articleCount).forEach(a => {
     const visible = a.images.filter(img => !hiddenImages[img]); // buang foto yang sudah "dihapus"
-    let imgs = visible.filter(img => !usedImages.has(img));
+    // Dibandingkan lewat fileKey() supaya foto yang sama dengan ukuran berbeda
+    // (mis. versi 1536px di artikel A dan versi asli di artikel B) tetap
+    // dihitung sebagai satu foto.
+    let imgs = visible.filter(img => !usedImages.has(fileKey(img)));
     if (imgs.length === 0 && visible.length > 0) {
       imgs = [visible[0]]; // semua duplikat -> tetap tampilkan satu, jangan sampai kosong
     }
-    imgs.forEach(img => usedImages.add(img));
+    imgs.forEach(img => usedImages.add(fileKey(img)));
     if (imgs.length === 0) imgs = [null]; // artikel memang tidak punya foto (valid) sama sekali
     imgs.forEach((image, i) => {
       q.push({
@@ -639,7 +713,7 @@ function buildQueue(articleList){
 
 /* ============ Ambil data dari WordPress ============ */
 async function fetchArticles(){
-  const res = await fetch(CONFIG.apiUrl, { cache:'no-store' });
+  const res = await fetch(`${CONFIG.apiUrl}?per_page=${articleCount}`, { cache:'no-store' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const posts = await res.json();
   if (!Array.isArray(posts)) throw new Error('Format respons tidak sesuai');
@@ -1008,6 +1082,21 @@ restoreHiddenBtn.addEventListener('click', async () => {
   if (!confirm('Pulihkan semua foto yang pernah dihapus/disembunyikan?')) return;
   await restoreAllHidden();
   alert('Semua foto yang disembunyikan sudah dipulihkan.');
+});
+
+// Isi pilihan jumlah berita, lalu ambil ulang data begitu diubah.
+CONFIG.articleCountOptions.forEach(n => {
+  const opt = document.createElement('option');
+  opt.value = String(n);
+  opt.textContent = n + ' berita';
+  articleCountSelect.appendChild(opt);
+});
+articleCountSelect.value = String(articleCount);
+articleCountSelect.addEventListener('change', () => {
+  articleCount = parseInt(articleCountSelect.value, 10);
+  try{ localStorage.setItem(CONFIG.articleCountKey, String(articleCount)); }catch(e){}
+  if (articles.length) renderSlides(true); // pengurangan jumlah langsung terlihat
+  loadData(true); // ambil ulang sesuai jumlah baru (untuk penambahan), posisi slide dijaga
 });
 
 qrVisibleToggle.addEventListener('change', () => {

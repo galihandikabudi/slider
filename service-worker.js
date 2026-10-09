@@ -1,5 +1,5 @@
-const SHELL_CACHE = 'muhada-shell-v4';
-const API_CACHE = 'muhada-api-v4';
+const SHELL_CACHE = 'muhada-shell-v5';
+const API_CACHE = 'muhada-api-v5';
 
 const SHELL_FILES = [
   './index.html',

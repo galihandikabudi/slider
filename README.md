@@ -60,7 +60,7 @@ sudah diatur custom domain), lalu:
 
 ## Fitur
 
-- **20 artikel terbaru**, tiap artikel bisa punya sampai 5 foto (foto utama +
+- **Berita terbaru** (jumlah bisa dipilih 5/10/15/20/30, default 20), tiap artikel bisa punya sampai 5 foto (foto utama +
   foto di isi artikel), berganti otomatis tiap 6 detik
 - **Gambar unik** — foto yang sama tidak akan tampil dua kali walau dipakai
   di beberapa artikel
@@ -107,6 +107,20 @@ Di panel admin (tekan-tahan logo + PIN), ada baris yang menunjukkan jumlah
 foto yang sedang disembunyikan/dihapus, dengan tombol **"Pulihkan semua foto
 tersembunyi"** — ini akan mengembalikan SEMUA foto yang pernah dihapus
 sekaligus (belum ada cara memulihkan satu-satu secara terpisah).
+
+## Mengatur jumlah berita yang ditampilkan
+
+Di panel admin (tekan-tahan logo + PIN) ada pilihan **"Jumlah berita
+ditampilkan"** (5, 10, 15, 20, 30). Tersimpan per-perangkat; proxy
+`/api/articles?per_page=N` meneruskan angkanya ke WordPress (maks 50).
+
+## Kualitas foto
+
+Setiap foto dipilih dengan satu aturan yang sama: ukuran terkecil yang
+lebarnya ≥ 1920px (dan ≤ 4200px agar tidak terlalu berat). Jika tidak ada,
+dipakai varian terbesar yang tersedia. Foto yang sama dari varian ukuran
+berbeda dianggap satu foto. Cek di console (Verbose):
+`[slider] foto unggulan dipilih`.
 
 ## Cara menyembunyikan QR code
 
